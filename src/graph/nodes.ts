@@ -42,6 +42,7 @@ export interface SkyLaserOut {
   fade: number; // brightness falls with the trigger's phase: exp(-phase * fade)
   width: number;
   glow: number;
+  reach: number;
   color: number[];
   intensity: number;
   hit: number;
@@ -58,6 +59,7 @@ export interface LaserOut {
   count: number; // beams
   width: number; // beam thickness, degrees as seen from the middle distance
   glow: number; // how far the glow reaches, in beam widths
+  reach: number; // 0..1 into the vista (cave mouth to farthest land) before the light has dissipated
   color: number[];
   intensity: number;
   sheet: number; // 0..1: fill between the beams with a plane of light
@@ -70,7 +72,9 @@ export interface ScanOut {
   position: number; // 0..1 across the scene's range on that axis
   lines: number; // slices in the stack: the front one plus trailing ones, fading
   spacing: number; // between slices, as a fraction of the range
-  thickness: number;
+  thickness: number; // feet, real-world scale (at least about a pixel on screen)
+  trail: number; // feet: the glow left behind the moving line, falling off
+  reach: number; // 0..1 into the vista before it dissipates
   color: number[];
   intensity: number;
 }
@@ -441,6 +445,7 @@ const defs: NodeDef[] = [
       { name: "spread", default: 40, min: 0, max: 180, step: 0.5 },
       { name: "count", default: 7, min: 1, max: 24, step: 1 },
       { name: "width", default: 0.08, min: 0.005, max: 2, step: 0.005 },
+      { name: "reach", default: 0.72, min: 0.05, max: 1, step: 0.01, doc: "how far into the vista the light gets before it dissipates (0 cave mouth, 1 farthest land)" },
       { name: "glow", default: 12, min: 1, max: 80, step: 0.5, doc: "how far the glow reaches, in beam widths" },
       { name: "color", default: [0.1, 1, 0.25] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
@@ -453,7 +458,7 @@ const defs: NodeDef[] = [
       (ctx.out.lasers ??= []).push({
         originU: num(i.originU), originV: num(i.originV), originDepth: Math.max(0, num(i.originDepth)),
         azimuth: num(i.azimuth), elevation: num(i.elevation), roll: num(i.roll), spread: clamp(num(i.spread), 0, 180),
-        count: Math.round(clamp(num(i.count), 1, 24)), width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), color: vec(i.color),
+        count: Math.round(clamp(num(i.count), 1, 24)), width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color),
         intensity: num(i.intensity), sheet: clamp(num(i.sheet), 0, 1), hit: Math.max(0, num(i.hit)),
       });
       return {};
@@ -480,6 +485,7 @@ const defs: NodeDef[] = [
       { name: "sheetWidth", default: 6, min: 0.5, max: 60, step: 0.5 },
       { name: "fade", default: 2, min: 0, max: 20, step: 0.1 },
       { name: "width", default: 0.07, min: 0.005, max: 2, step: 0.005 },
+      { name: "reach", default: 0.72, min: 0.05, max: 1, step: 0.01, doc: "how far into the vista the light gets before it dissipates (0 cave mouth, 1 farthest land)" },
       { name: "glow", default: 12, min: 1, max: 80, step: 0.5, doc: "how far the glow reaches, in beam widths" },
       { name: "color", default: [0.2, 0.6, 1] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
@@ -492,7 +498,7 @@ const defs: NodeDef[] = [
         count: Math.round(clamp(num(i.count), 1, 24)), trigger: num(i.trigger), seed: num(i.seed),
         uMin: num(i.uMin), uMax: num(i.uMax), vMin: num(i.vMin), vMax: num(i.vMax), minDepth: Math.max(0, num(i.minDepth)), tilt: Math.max(0, num(i.tilt)),
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
-        width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
+        width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
       });
       return {};
     },
@@ -501,15 +507,17 @@ const defs: NodeDef[] = [
     type: "Scan",
     category: "Output",
     doc:
-      "MRI-style scan: a stack of parallel slices sweeping through the scene, lighting the rock where each slice cuts it. " +
+      "MRI-style scan: a slice (or stack of slices) sweeping through the scene, lighting the rock where it cuts, with a trail behind. Sizes in real-world feet. " +
       "axis 0: depth (contours of equal distance, near to far), 1: height, 2: sideways. position 0..1 across the scene " +
       "(wire a Bar count through fract() for a sweep locked to the music).",
     inputs: [
       { name: "axis", default: 0, kind: "const", min: 0, max: 2, step: 1 },
       { name: "position", default: 0.5, min: 0, max: 1, step: 0.005 },
-      { name: "lines", default: 6, kind: "const", min: 1, max: 32, step: 1 },
+      { name: "lines", default: 1, kind: "const", min: 1, max: 32, step: 1 },
       { name: "spacing", default: 0.035, min: 0.001, max: 0.5, step: 0.001 },
-      { name: "thickness", default: 1, min: 0.1, max: 10, step: 0.05 },
+      { name: "thickness", default: 0.5, min: 0.01, max: 500, step: 0.1, doc: "feet, real-world scale" },
+      { name: "trail", default: 1, min: 0, max: 5000, step: 0.1, doc: "feet: glow left behind the moving line" },
+      { name: "reach", default: 0.72, min: 0.05, max: 1, step: 0.01 },
       { name: "color", default: [0.4, 0.9, 1] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
     ],
@@ -518,7 +526,8 @@ const defs: NodeDef[] = [
       if (num(i.intensity) <= 0) return {};
       ctx.out.scan = {
         axis: Math.round(clamp(num(i.axis), 0, 2)), position: num(i.position), lines: Math.round(clamp(num(i.lines), 1, 32)),
-        spacing: Math.max(0.001, num(i.spacing)), thickness: Math.max(0.1, num(i.thickness)), color: vec(i.color), intensity: num(i.intensity),
+        spacing: Math.max(0.001, num(i.spacing)), thickness: Math.max(0.01, num(i.thickness)), trail: Math.max(0, num(i.trail)),
+        reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity: num(i.intensity),
       };
       return {};
     },

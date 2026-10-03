@@ -480,8 +480,9 @@
     "seed": 1,
     "tilt": 10,
     "fade": 1.5,
-    "width": 0.07,
-    "hit": 2
+    "width": 0.03,
+    "hit": 2,
+    "glow": 6
    }
   },
   {
@@ -551,9 +552,9 @@
    "name": "MRI scan",
    "params": {
     "axis": 0,
-    "lines": 8,
-    "spacing": 0.03,
-    "thickness": 1
+    "lines": 1,
+    "thickness": 0.5,
+    "trail": 1
    }
   }
  ],

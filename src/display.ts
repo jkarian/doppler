@@ -646,13 +646,22 @@ async function main() {
     }
     return { lo, hi };
   })();
+  // Real-world scale: the far land is about 3 miles (15,840 ft) out.
+  const feetPerUnit = 15840 / pct(0.95);
   const scanUniforms = (s: RenderOut["scan"]): number[] => {
     if (!s) return new Array(12).fill(0);
     const span = landRange.hi[s.axis] - landRange.lo[s.axis];
-    const front = landRange.lo[s.axis] + span * s.position;
-    // Thickness: for depth it's in log units (constant on screen), otherwise it's scaled in the shader.
-    const thick = s.axis === 0 ? 0.006 * s.thickness : s.thickness;
-    return [s.axis, front, s.spacing * span, thick, ...(s.color as Vec3), s.intensity, s.lines, 0, 0, 0];
+    let front: number;
+    let spacing: number;
+    if (s.axis === 0) {
+      // Depth sweeps evenly in log distance, but the shader works in plain distance.
+      front = Math.exp(landRange.lo[0] + span * s.position);
+      spacing = front * (1 - Math.exp(-s.spacing * span));
+    } else {
+      front = landRange.lo[s.axis] + span * s.position;
+      spacing = s.spacing * span;
+    }
+    return [s.axis, front, s.trail / feetPerUnit, s.thickness / feetPerUnit, ...(s.color as Vec3), s.intensity, s.lines, spacing, s.reach, 0];
   };
 
   // Lasers: origin, fan basis, and each beam's length to the first rock it hits (marched through the
@@ -709,7 +718,7 @@ async function main() {
       const half = (L.spread / 2) * rad;
       const base = 4 + li * 24;
       // Width: degrees as seen from the middle distance of the scene, turned into a physical thickness.
-      laserData.set([...o, L.count, ...aim, L.sheet, ...right, half, ...normal, L.intensity, ...(L.color as Vec3), L.width * rad * pivotZ, L.hit, maxLen, L.glow, 0], base);
+      laserData.set([...o, L.count, ...aim, L.sheet, ...right, half, ...normal, L.intensity, ...(L.color as Vec3), L.width * rad * pivotZ, L.hit, maxLen, L.glow, L.reach], base);
       for (let bi = 0; bi < L.count; bi++) {
         const a = L.count > 1 ? -half + (2 * half * bi) / (L.count - 1) : 0;
         const d = normalize(aim.map((x, i) => x * Math.cos(a) + right[i] * Math.sin(a)) as Vec3);
@@ -724,7 +733,7 @@ async function main() {
       const step = Math.floor(S.trigger);
       const brightness = S.intensity * Math.exp(-(S.trigger - step) * S.fade);
       const height = info.far * 0.6;
-      laserData.set([0, 0, 0, S.count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, 0], 4 + li * 24);
+      laserData.set([0, 0, 0, S.count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
       for (let bi = 0; bi < S.count; bi++) {
         const rand = seeded(S.seed * 100003 + step * 101 + bi);
         let u = 0.5;

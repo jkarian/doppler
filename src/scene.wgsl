@@ -37,27 +37,32 @@ struct Uniforms {
   pad0: f32,
   scan: vec4f,         // MRI scan: axis (0 depth, 1 height, 2 sideways), front position, spacing, thickness (in axis units)
   scanColor: vec4f,    // rgb, intensity
-  scanLines: vec4f,    // number of slices, -, -, -
+  scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), -
 };
 
 // MRI-style scan: slices of constant depth (log distance), height or sideways position, sweeping
 // through the scene. Each slice lights a thin line where it cuts the rock; trailing slices fade.
 fn scanLight(p: vec3f) -> f32 {
   let axis = i32(u.scan.x + 0.5);
-  var c = log(max(p.z, 1e-3));
+  var c = p.z;
   if (axis == 1) { c = p.y; }
   if (axis == 2) { c = p.x; }
-  // Keep lines about the same width on screen: thickness scales with distance (already log for depth).
-  var thick = u.scan.w;
-  if (axis != 0) { thick = u.scan.w * (0.004 * p.z + 0.002); }
+  // Sizes are real-world (scene units here), but never thinner than about a pixel on screen.
+  let dist = distance(p, u.camPos);
+  let pixel = 2.0 * u.tanHalfFov / (u.screen.y * u.viewScale.y) * dist;
+  let thick = max(u.scan.w, pixel);
+  let trail = max(u.scan.z, thick);
   var g = 0.0;
   let n = i32(u.scanLines.x + 0.5);
   for (var k = 0; k < n; k++) {
-    let d = c - (u.scan.y - f32(k) * u.scan.z);
+    let d = c - (u.scan.y - f32(k) * u.scanLines.y);
+    let core = exp(-pow(d / thick, 2.0));
+    // Behind the moving line: a gentle trail that falls off.
+    let behind = select(0.0, 0.6 * exp(d / trail), d < 0.0);
     let fade = 1.0 - f32(k) / f32(n);
-    g += exp(-pow(d / thick, 2.0)) * fade * fade;
+    g += max(core, behind) * fade * fade;
   }
-  return u.scanColor.a * g;
+  return u.scanColor.a * g * reachFade(dist, u.scanLines.z);
 }
 
 // Lens flare, in screen space: a glow and starburst at the sun, and coloured ghosts along the line
@@ -126,7 +131,7 @@ struct Laser {
   right: vec3f, halfSpread: f32,   // radians
   normal: vec3f, intensity: f32,   // normal of the fan's plane
   color: vec3f, width: f32,        // width: beam thickness in scene units (thins with distance)
-  hit: f32, maxLen: f32, glow: f32, pad1: f32,   // glow: how far the glow reaches, in beam widths
+  hit: f32, maxLen: f32, glow: f32, reach: f32,  // glow: in beam widths; reach: 0..1 into the vista
 };
 struct Lasers {
   count: u32, pad0: u32, pad1: u32, pad2: u32,
@@ -155,18 +160,27 @@ struct LaserLight {
   rock: vec3f,
 };
 
-// Glow across a beam, x = 0 at its centre to 1 at the edge of the glow: a flat hot core, a rounded
-// shoulder, a quick drop to about half, then a long slow tail into the haze.
+// Glow across a beam, x = 0 at its centre to 1 at the edge of the glow: a sharp bright core that
+// drops to about a fifth within the first eighth, then a long faint tail into the haze.
 fn glowProfile(x: f32) -> f32 {
-  let past = max(0.0, x - 0.08);
-  return exp(-pow(past / 0.3, 1.3));
+  return 0.75 * exp(-x / 0.04) + 0.25 * exp(-x / 0.25);
+}
+
+// How far into the vista a distance is: 0 at the camera, 1 at the farthest land (log distance).
+fn vistaDepth(d: f32) -> f32 {
+  return clamp(log(max(d, 1.0)) / log(max(u.far / 1.5, 2.0)), 0.0, 1.0);
+}
+
+// Light dissipates before `reach` (0..1 into the vista): it never gets to the far canyon, where the
+// depth map is least reliable.
+fn reachFade(d: f32, reach: f32) -> f32 {
+  return 1.0 - smoothstep(reach - 0.15, reach, vistaDepth(d));
 }
 
 // Laser and scan light fade with distance across the vista: full at the cave mouth, 30% at the far end
 // of the land, spread evenly in log distance (gentler than real life, so far rock still lights up).
 fn distanceFade(d: f32) -> f32 {
-  let k = clamp(log(max(d, 1.0)) / log(max(u.far / 1.5, 2.0)), 0.0, 1.0);
-  return mix(1.0, 0.3, k);
+  return mix(1.0, 0.3, vistaDepth(d));
 }
 
 fn laserLight(p: vec3f, sky: bool) -> LaserLight {
@@ -214,7 +228,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
           let rel = cam + tp * v - o;
           let a = atan2(dot(rel, side), dot(rel, d));
           if (abs(a) <= db.w && length(rel) < b.w / max(cos(a), 0.2)) {
-            g += 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * distanceFade(tp); // faint haze: the contour lines carry it
+            g += 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * distanceFade(tp) * reachFade(tp, L.reach); // faint haze
           }
         }
         if (!sky) {
@@ -228,7 +242,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         }
       }
       // A sheet reads as a plane: its individual beams fade back.
-      g += glowProfile(ang / (drawAng * L.glow)) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t);
+      g += 0.5 * glowProfile(ang / (drawAng * L.glow)) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
@@ -246,7 +260,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         let a = atan2(dot(rel, L.right), dot(rel, L.aim));
         if (abs(a) <= L.halfSpread && length(rel) < fanLength(li, n, a, L.halfSpread)) {
           // Faint: light scattered by haze. The contour lines and edges carry the shape.
-          g += L.sheet * 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp);
+          g += L.sheet * 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp) * reachFade(tp, L.reach);
         }
       }
       // Contour line where the plane cuts the rock it reaches.
@@ -261,7 +275,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       }
     }
     air += L.color * (L.intensity * g);
-    rock += L.color * (L.intensity * r * distanceFade(length(toP)));
+    rock += L.color * (L.intensity * r * distanceFade(length(toP)) * reachFade(length(toP), L.reach));
   }
   return LaserLight(air, rock);
 }
