@@ -6,6 +6,8 @@ The file holds:
     beats       beat times, seconds
     downbeats   bar starts (assumes 4/4; phase picked by where the low end hits hardest)
     loudness    0..1 perceived loudness at `rate` values per second
+    intensity   0..1 loudness plus brightness (filters opening, high layers): structure of flat-mastered tracks
+    sub         0..1 kick and sub-bass (25-65 Hz): drops out before techno drops
     bass        0..1 energy under ~150 Hz, same rate
     hats        [time, strength] of high-frequency hits (hats, shakers), for flicker
     sections    [{start, end, kind}] with kind = quiet | build | drop | normal
@@ -107,8 +109,25 @@ def analyse(path: Path) -> dict:
     loudness = np.interp(times, frame_times, loud)
     bass_curve = np.interp(times, frame_times, uniform_filter1d(bass, size=max(1, int(frame_rate * 0.1))))
 
+    # Heavily mastered tracks are flat in loudness; their structure is in brightness (filters opening,
+    # high layers coming in) and in the kick cutting out and slamming back. Two more curves for that.
+    S = np.abs(librosa.stft(y, n_fft=2048, hop_length=HOP))
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
+    band_db = lambda lo, hi: librosa.amplitude_to_db(S[(freqs >= lo) & (freqs < hi)].mean(axis=0) + 1e-10, ref=np.max)
+
+    def spread(a: np.ndarray) -> np.ndarray:  # to 0..1 over this track's own range
+        lo, hi = np.percentile(a, [5, 95])
+        return np.clip((a - lo) / max(hi - lo, 1e-6), 0, 1)
+
+    sub = spread(uniform_filter1d(band_db(25, 65), size=max(1, int(frame_rate * 0.1))))
+    intensity = 0.35 * spread(db) + 0.4 * spread(band_db(2000, 6000)) + 0.25 * spread(band_db(6000, 11000))
+    intensity = uniform_filter1d(intensity, size=max(1, int(frame_rate * 0.5)))
+    sub_curve = np.interp(times, frame_times[: len(sub)], sub[: len(frame_times)])
+    intensity_curve = np.interp(times, frame_times[: len(intensity)], intensity[: len(frame_times)])
+
     hats = find_hats(y, sr)
-    sections = find_sections(loudness, bass_curve, LOUDNESS_RATE, duration)
+    # Half loudness, half intensity: loudness carries the structure of dynamic tracks, intensity of flat ones.
+    sections = find_sections(0.5 * loudness + 0.5 * intensity_curve, bass_curve, LOUDNESS_RATE, duration, kick_returns(sub_curve, LOUDNESS_RATE))
     # A drop starts on its first big hit: move each drop to the beat with the strongest bass attack
     # within a beat of where the loudness curves put it (smoothing makes those land a little late).
     attack = maximum_filter1d(norm(bass_onset), 5)
@@ -138,6 +157,8 @@ def analyse(path: Path) -> dict:
         "downbeats": [round(float(b), 3) for b in downbeats],
         "loudness": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in loudness]},
         "bass": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in bass_curve]},
+        "sub": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in sub_curve]},
+        "intensity": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in intensity_curve]},
         "sections": sections,
         "hats": hats,
     }
@@ -155,9 +176,26 @@ def find_hats(y: np.ndarray, sr: int) -> list[list[float]]:
     return [[round(float(t), 3), round(float(min(1.0, high[p])), 2)] for t, p in zip(times, peaks) if high[p] > 0.2]
 
 
-def find_sections(loudness: np.ndarray, bass: np.ndarray, rate: int, duration: float) -> list[dict]:
-    """Label quiet, build and drop stretches from the slow loudness and bass envelopes."""
-    energy = uniform_filter1d(loudness, size=2 * rate)  # 2 s window
+def kick_returns(sub: np.ndarray, rate: int) -> list[int]:
+    """Indices where the kick (sub-bass) slams back after cutting out for at least half a second,
+    in a stretch where it's otherwise present: the techno drop."""
+    s = uniform_filter1d(sub, size=max(1, rate // 4))
+    out, start = [], None
+    for i, v in enumerate(s):
+        if v < 0.35 and start is None:
+            start = i
+        elif v > 0.6 and start is not None:
+            context = s[max(0, start - 4 * rate) : start]
+            if i - start >= rate // 2 and len(context) and np.median(context) > 0.6:
+                out.append(i)
+            start = None
+    return out
+
+
+def find_sections(energy_curve: np.ndarray, bass: np.ndarray, rate: int, duration: float, extra_drops: list[int] = ()) -> list[dict]:
+    """Label quiet, build and drop stretches from the slow intensity and bass envelopes, plus any
+    drops found elsewhere (kick returns)."""
+    energy = uniform_filter1d(energy_curve, size=2 * rate)  # 2 s window
     lo, hi = np.percentile(energy, [10, 90])
     span = max(hi - lo, 1e-3)
     labels = np.full(len(energy), "normal", dtype=object)
@@ -170,13 +208,16 @@ def find_sections(loudness: np.ndarray, bass: np.ndarray, rate: int, duration: f
     jump = after - before
     jump[: 3 * rate] = jump[-rate:] = 0
     candidates = np.where((jump > 0.15) & (np.roll(energy, -rate) > lo + 0.6 * span))[0]
-    drops = []
+    drops = sorted(extra_drops)
+    for d in list(drops):
+        candidates = candidates[np.abs(candidates - d) > 8 * rate]
     for i in candidates:
-        if not drops or i - drops[-1] > 8 * rate:
+        if not drops or min(abs(i - d) for d in drops) > 8 * rate:
             # The drop lands where the bass rises most over a quarter second in this stretch.
             q = max(1, rate // 4)
             window = np.arange(max(0, i - rate), min(len(bass) - q, i + 2 * rate))
             drops.append(int(window[np.argmax(bass[window + q] - bass[window])]) + 1)
+    drops = sorted(drops)
     for d in drops:
         # Drop lasts while energy stays in the upper half. Start checking a second in:
         # the 2 s energy window still remembers any silence just before the drop.

@@ -8,6 +8,8 @@ export interface Analysis {
   downbeats: number[];
   loudness: { rate: number; values: number[] };
   bass: { rate: number; values: number[] };
+  sub?: { rate: number; values: number[] }; // kick and sub-bass, 0..1 over the track's range
+  intensity?: { rate: number; values: number[] }; // loudness plus brightness, 0..1
   sections: { start: number; end: number; kind: SectionKind }[];
   hats?: [number, number][]; // high-frequency hits: [time, strength]
 }
@@ -49,7 +51,12 @@ export class Music {
     // Drops always get a big spurt.
     const candidates: (Spurt & { drop: boolean })[] = drops.map((t, i) => ({ t, deg: 35 + 10 * seeded(9000 + i)(), drop: true }));
     for (const [i, t] of this.a.downbeats.entries()) {
-      const hit = this.bass(t + 0.05) - Math.min(this.bass(t - 0.15), this.bass(t - 0.3));
+      // A hit: the low end punching in, or the music getting noticeably more intense than a bar ago.
+      const hit = Math.max(
+        this.bass(t + 0.05) - Math.min(this.bass(t - 0.15), this.bass(t - 0.3)),
+        this.sub(t + 0.05) - Math.min(this.sub(t - 0.3), this.sub(t - 0.6)),
+        (this.energy(t + 1, 1) - this.energy(t - 1, 2)) * 0.8,
+      );
       const sec = this.section(t);
       if (sec.kind === "quiet" || !(hit > 0.05 || (sec.kind === "drop" && this.bass(t + 0.05) > 0.6))) continue;
       const intensity = 0.4 + 0.6 * this.energy(t, 1);
@@ -119,11 +126,21 @@ export class Music {
     return sampleCurve(this.a.bass, t);
   }
 
-  /** Loudness averaged over the last `window` seconds: for slow moves that shouldn't jitter. */
+  /** Kick and sub-bass presence (falls back to bass for older analysis files). */
+  sub(t: number): number {
+    return sampleCurve(this.a.sub ?? this.a.bass, t);
+  }
+
+  /** Loudness plus brightness: how intense the music feels, even when it's mastered flat. */
+  intensity(t: number): number {
+    return this.a.intensity ? sampleCurve(this.a.intensity, t) : this.loudness(t);
+  }
+
+  /** Intensity averaged over the last `window` seconds: for slow moves that shouldn't jitter. */
   energy(t: number, window = 2): number {
     let sum = 0;
     const steps = 8;
-    for (let k = 0; k < steps; k++) sum += this.loudness(t - (window * k) / steps);
+    for (let k = 0; k < steps; k++) sum += this.intensity(t - (window * k) / steps);
     return sum / steps;
   }
 
@@ -227,11 +244,16 @@ export class SunGate {
   private readonly samples: Float32Array;
 
   constructor(music: Music) {
-    const values = music.a.bass.values;
-    const sorted = [...values].sort((a, b) => a - b);
+    // Kick presence and intensity together: the sun is out when the kick is in and the music is
+    // intense; it goes dark in breakdowns, intros, and when the kick cuts.
+    const signal = (t: number) => 0.3 * music.sub(t) + 0.7 * music.intensity(t);
+    const values: number[] = [];
+    for (let t = 0; t < music.a.duration; t += 0.05) values.push(signal(t));
+    // Range from the playing part only: silent intros and outros would drag the thresholds down.
+    const sorted = values.filter((v) => v > 0.25).sort((a, b) => a - b);
     const pct = (f: number) => sorted[Math.floor((sorted.length - 1) * f)] ?? 0;
-    const lo = pct(0.1);
-    const hi = pct(0.9);
+    const lo = pct(0.15);
+    const hi = pct(0.95);
     const on = lo + 0.6 * (hi - lo);
     const off = lo + 0.45 * (hi - lo);
     const n = Math.ceil(music.a.duration * SunGate.RATE) + 1;
@@ -242,7 +264,7 @@ export class SunGate {
     for (let k = 0; k < n; k++) {
       const t = k * dt;
       let bass = 0; // half a second of bass, so single kicks don't toggle it
-      for (let j = 0; j < 10; j++) bass += music.bass(t - j * 0.05);
+      for (let j = 0; j < 10; j++) bass += signal(t - j * 0.05);
       bass /= 10;
       if (!lit && bass > on) lit = true;
       else if (lit && bass < off) lit = false;
