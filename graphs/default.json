@@ -621,6 +621,24 @@
    }
   },
   {
+   "id": "setupNooks",
+   "type": "Setup",
+   "name": "Setup: nook lights",
+   "params": {
+    "on": 1,
+    "intro": 1,
+    "build": 1,
+    "drop": 1,
+    "breakdown": 1,
+    "normal": 1,
+    "outro": 0
+   },
+   "pos": [
+    1260,
+    300
+   ]
+  },
+  {
    "id": "setupSun",
    "type": "Setup",
    "name": "Setup: sun",
@@ -726,6 +744,20 @@
    "pos": [
     1630,
     1550
+   ]
+  },
+  {
+   "id": "nooks",
+   "type": "NookLights",
+   "name": "Nook lights",
+   "params": {
+    "positions": "0.4882,0.2878; 0.5024,0.3423; 0.5495,0.3591; 0.4835,0.4430; 0.4325,0.5394; 0.5307,0.5981; 0.4387,0.7532; 0.5085,0.9025",
+    "sounds": "tick|tock",
+    "pattern": 1
+   },
+   "pos": [
+    1260,
+    450
    ]
   }
  ],
@@ -1517,6 +1549,16 @@
    ],
    "to": [
     "scan",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "setupNooks",
+    "level"
+   ],
+   "to": [
+    "nooks",
     "level"
    ]
   }

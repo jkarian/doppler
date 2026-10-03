@@ -58,7 +58,7 @@ Defined in `src/graph/nodes.ts` (each with a one-line doc shown in the editor). 
 
 | Category | Types |
 |---|---|
-| Music | Time, Beat, Bar, Phrase, Intensity, Loudness, Bass, Pump, Hats, Section, DropHit, Tension, Spurts, Gate |
+| Music | Time, Beat, Bar, Phrase, Sound, Intensity, Loudness, Bass, Pump, Hats, Section, DropHit, Tension, Spurts, Gate |
 | Scene | GapHorizon |
 | Value | Number, Color |
 | Setup | Setup |
@@ -100,6 +100,7 @@ Output nodes write the renderer's parameters. Anything a graph doesn't set keeps
 | Sun | `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
 | Camera | `swayX`, `swayY`, `pushZ` in units of the display's sway amount (pushZ is clamped to ≥ 0) |
 | Tone | `baseDim`, `baked`, `cap` |
+| NookLights | `positions` (u,v; u,v; ... picture points), `sounds` (names, `|`-separated), `pattern`, `seed`, `attack`, `decay`, `size` (pool diameter, fraction of picture width), `standoff`, `color`, `intensity`, `level` |
 
 Sun, Laser, SkyLaser and Scan also take `level` (0..1, default 1), which scales them. A `Setup` node's `level`
 output goes there: a setup (the sun, the ground laser rigs, the scan, ...) plays in the kinds of section ticked

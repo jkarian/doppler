@@ -6,7 +6,7 @@
 // trigger a precompute). Values are numbers or 3-vectors (colours). Output nodes write the renderer's
 // parameters into ctx.out.
 
-import { Music, SunGate, SunMotion, type GateOptions, type MotionOptions, type SpurtOptions } from "../music.ts";
+import { Music, seeded, SunGate, SunMotion, type GateOptions, type MotionOptions, type SpurtOptions } from "../music.ts";
 import { compile } from "./expr.ts";
 
 export type Value = number | number[] | string;
@@ -88,7 +88,17 @@ export interface ScanOut {
   intensity: number;
 }
 
+/** Nook lights: small lights tucked into the rock, each at a point in the picture, at its own level. */
+export interface NookOut {
+  lights: { u: number; v: number; level: number }[];
+  size: number; // each pool's diameter as a fraction of the picture's width, at the light's distance
+  standoff: number; // how far in front of the rock (toward the camera), as a fraction of the pool's radius
+  color: number[];
+  intensity: number;
+}
+
 export interface RenderOut {
+  nooks?: NookOut;
   scan?: ScanOut;
   lasers?: LaserOut[];
   skyLasers?: SkyLaserOut[];
@@ -257,6 +267,31 @@ const defs: NodeDef[] = [
         ahead: Number.isFinite(next.until) ? next.until : 1e6,
         windup: x * x * (3 - 2 * x),
       };
+    },
+  },
+  {
+    type: "Sound",
+    category: "Music",
+    doc:
+      "A sound named by example in the analysis (e.g. tick, tock: tools/audio_analysis.py --sound tick@0.615): count of hits so far, " +
+      "a hit that is 1 on each and decays, and seconds since the last.",
+    inputs: [
+      { name: "name", default: "tick", kind: "const" },
+      { name: "decay", default: 0.3, kind: "const", min: 0.02, max: 5, step: 0.01 },
+    ],
+    outputs: ["count", "hit", "since"],
+    eval: (i, ctx) => {
+      const hits = ctx.music?.sound(String(i.name)) ?? [];
+      let lo = 0;
+      let hi = hits.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (hits[mid][0] <= ctx.t) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo === 0) return { count: 0, hit: 0, since: 1e6 };
+      const since = ctx.t - hits[lo - 1][0];
+      return { count: lo, hit: hits[lo - 1][1] * Math.exp(-since / num(i.decay)), since };
     },
   },
   {
@@ -656,6 +691,86 @@ const defs: NodeDef[] = [
         axis: Math.round(clamp(num(i.axis), 0, 2)), position: num(i.position), lines: Math.round(clamp(num(i.lines), 1, 32)),
         spacing: Math.max(0.001, num(i.spacing)), thickness: Math.max(0.01, num(i.thickness)), trail: Math.max(0, num(i.trail)),
         reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity,
+      };
+      return {};
+    },
+  },
+  {
+    type: "NookLights",
+    category: "Output",
+    doc:
+      "Small lights tucked into nooks in the rock, each washing a pool of light over the walls around it (cut off where rock " +
+      "juts out in between). Each hit of the named sounds switches one on: it rises over attack seconds and eases out over " +
+      "decay. positions: u,v picture points separated by ; (place them on the display with N). sounds: names separated by |. " +
+      "pattern 0: hits walk through the lights in order; 1: the first sound fires the left half, the second the right half; " +
+      "2: seeded random. Up to 3 show at once.",
+    inputs: [
+      { name: "positions", default: "0.5,0.7", kind: "const" },
+      { name: "sounds", default: "tick|tock", kind: "const" },
+      { name: "pattern", default: 1, kind: "const", min: 0, max: 2, step: 1 },
+      { name: "seed", default: 1, kind: "const", step: 1 },
+      { name: "attack", default: 0.04, kind: "const", min: 0, max: 2, step: 0.01, doc: "seconds to come on" },
+      { name: "decay", default: 2, kind: "const", min: 0.05, max: 10, step: 0.05, doc: "seconds to go out" },
+      { name: "size", default: 0.06, min: 0.005, max: 0.5, step: 0.005, doc: "pool diameter, fraction of the picture's width (the canyon is miles deep: real-size lamps would be specks)" },
+      { name: "standoff", default: 0.3, min: 0, max: 2, step: 0.01, doc: "distance in front of the rock, as a fraction of the pool's radius" },
+      { name: "color", default: [1, 0.55, 0.22] },
+      { name: "intensity", default: 3, min: 0, step: 0.05 },
+      { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
+    ],
+    outputs: [],
+    init: (c, ctx) => {
+      const pts = String(c.positions)
+        .split(";")
+        .map((p) => p.split(",").map(Number))
+        .filter((p) => p.length === 2 && p.every(Number.isFinite)) as [number, number][];
+      const n = pts.length;
+      const order = pts.map((p, k) => k).sort((a, b) => pts[a][0] - pts[b][0]); // left to right
+      const groups = String(c.sounds).split("|").map((s) => s.trim()).filter(Boolean);
+      const pattern = Math.round(num(c.pattern));
+      const rand = seeded(num(c.seed) * 7919 + 13);
+      // Every hit of every named sound, in time order, with the light it fires.
+      const hits: [number, number, number][] = []; // time, strength, light
+      groups.forEach((g, gi) => (ctx.music?.sound(g) ?? []).forEach(([t, s]) => hits.push([t, s, gi])));
+      hits.sort((a, b) => a[0] - b[0]);
+      const next = groups.map(() => 0);
+      let walk = 0;
+      let last = -1;
+      for (const h of hits) {
+        let light = 0;
+        if (n === 0) break;
+        if (pattern === 1 && groups.length > 1) {
+          // Split left to right among the sounds: tick lights the left side, tock the right.
+          const per = Math.max(1, Math.floor(n / groups.length));
+          const lo = h[2] * per;
+          const hi = h[2] === groups.length - 1 ? n : Math.min(n, lo + per);
+          light = order[lo + (next[h[2]]++ % Math.max(1, hi - lo))];
+        } else if (pattern === 2) {
+          do light = Math.floor(rand() * n);
+          while (n > 1 && light === last);
+        } else light = order[walk++ % n];
+        last = light;
+        h[2] = light;
+      }
+      return { pts, hits, attack: num(c.attack), decay: num(c.decay) };
+    },
+    eval: (i, ctx, state) => {
+      const s = state as { pts: [number, number][]; hits: [number, number, number][]; attack: number; decay: number };
+      const level = clamp(num(i.level), 0, 1);
+      const lv = s.pts.map(() => 0);
+      if (level > 0) {
+        const ease = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+        let k = s.hits.length - 1;
+        while (k >= 0 && s.hits[k][0] > ctx.t) k--;
+        for (; k >= 0 && ctx.t - s.hits[k][0] < s.attack + s.decay; k--) {
+          const [t0, strength, light] = s.hits[k];
+          const x = ctx.t - t0;
+          const env = x < s.attack ? ease(x / Math.max(s.attack, 1e-3)) : 1 - ease((x - s.attack) / s.decay);
+          lv[light] = Math.max(lv[light], env * (0.6 + 0.4 * strength));
+        }
+      }
+      ctx.out.nooks = {
+        lights: s.pts.map(([u, v], k) => ({ u, v, level: lv[k] * level })),
+        size: Math.max(0.001, num(i.size)), standoff: Math.max(0, num(i.standoff)), color: vec(i.color), intensity: Math.max(0, num(i.intensity)),
       };
       return {};
     },

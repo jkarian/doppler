@@ -10,6 +10,7 @@
 //   M camera sway on/off   ; '  sway amount   O fill / fit whole picture
 //   with ?track=<file in tracks/>:
 //   space play/pause   J L seek 5 s   { } audio/video offset (10 ms; alt: 1 ms)   A auto light on/off
+//   N place nook lights (click add, shift/right-click remove; shows them all)
 //   G music monitor: the track's sections, drops, energy and tension, live meters, and response sliders
 //   S shadows   V cycle debug view   H show values   P save 1080p frame (shift: 4K)   C copy values   R reset   F full screen
 
@@ -192,7 +193,7 @@ async function main() {
   const shadowTexture = () =>
     device.createTexture({
       size: shadowSize,
-      format: "r16float",
+      format: "rgba16float", // r: sun/spot, g b a: up to 3 nook lights
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
   const shadowA = shadowTexture();
@@ -201,7 +202,7 @@ async function main() {
     device.createRenderPipeline({
       layout: "auto",
       vertex: { module, entryPoint: "vs_full" },
-      fragment: { module, entryPoint, constants, targets: [{ format: "r16float" }] },
+      fragment: { module, entryPoint, constants, targets: [{ format: "rgba16float" }] },
     });
   const shadowPipeline = fullscreen("fs_shadow");
   const raysPipeline = fullscreen("fs_rays");
@@ -219,6 +220,11 @@ async function main() {
   const laserData = new Float32Array(LASER_FLOATS);
   const laserCount = new Uint32Array(laserData.buffer, 0, 1);
   const laserBuf = device.createBuffer({ size: LASER_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  // Nook lights: count + 8 lights x 8 floats. Layout matches `Nooks` in scene.wgsl.
+  const NOOK_FLOATS = 4 + 8 * 8;
+  const nookData = new Float32Array(NOOK_FLOATS);
+  const nookCount = new Uint32Array(nookData.buffer, 0, 1);
+  const nookBuf = device.createBuffer({ size: NOOK_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const uniforms = new Float32Array(UNIFORM_FLOATS);
   const uniformBuf = device.createBuffer({ size: UNIFORM_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const bindGroup = device.createBindGroup({
@@ -236,6 +242,7 @@ async function main() {
       { binding: 6, resource: shadowA.createView() },
       { binding: 7, resource: raysTex.createView() },
       { binding: 8, resource: { buffer: laserBuf } },
+      { binding: 9, resource: { buffer: nookBuf } },
     ],
   });
   const raysBind = device.createBindGroup({
@@ -252,6 +259,7 @@ async function main() {
     entries: [
       { binding: 0, resource: { buffer: uniformBuf } },
       { binding: 4, resource: depthTex.createView() },
+      { binding: 9, resource: { buffer: nookBuf } },
     ],
   });
   const blurBind = (pipe: GPURenderPipeline, input: GPUTexture) =>
@@ -491,10 +499,37 @@ async function main() {
   };
 
   // --- Input ------------------------------------------------------------------
+  // Nook light placement (N): click adds a light at that spot in the picture, shift- or right-click removes
+  // the nearest. Edits the graph's NookLights node (and reaches the editor); all lights show while placing.
+  let nookPlacing = false;
+  const placeNook = (e: PointerEvent) => {
+    const node = runtime.graph.nodes.find((n) => n.type === "NookLights");
+    if (!node) return;
+    const pts = String(node.params?.positions ?? "")
+      .split(";")
+      .map((q) => q.split(",").map(Number))
+      .filter((q) => q.length === 2 && q.every(Number.isFinite));
+    const [u, v] = toImageUv(e);
+    if (e.shiftKey || e.button === 2) {
+      let best = -1;
+      let bd = Infinity;
+      pts.forEach((q, i) => {
+        const d = Math.hypot((q[0] - u) * aspect, q[1] - v);
+        if (d < bd) (bd = d), (best = i);
+      });
+      if (best >= 0 && bd < 0.06) pts.splice(best, 1);
+    } else pts.push([u, v]);
+    node.params = { ...node.params, positions: pts.map((q) => q.map((x) => x.toFixed(4)).join(",")).join("; ") };
+    runtime.load(runtime.graph);
+    channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
+    monitor?.graphChanged();
+  };
+
   let dragging: "target" | "source" | null = null;
   let last = [0, 0];
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
+    if (nookPlacing) return placeNook(e);
     canvas.setPointerCapture(e.pointerId);
     dragging = e.button === 2 ? "source" : "target";
     last = [e.clientX, e.clientY];
@@ -569,6 +604,7 @@ async function main() {
     else if (key === "e") window.open(`editor.html?graph=${graphName}`, "doppler-editor");
     else if (key === "b") benchmark();
     else if (key === "g") monitor?.toggle();
+    else if (key === "n") nookPlacing = !nookPlacing;
     else if (key === "t") look.sun = !look.sun;
     else if (key === "1") look.flare = clamp(look.flare / 1.25, 0, 5);
     else if (key === "2") look.flare = clamp(look.flare * 1.25 || 0.05, 0, 5);
@@ -617,6 +653,7 @@ async function main() {
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
     writeLasers(graphOut.lasers ?? [], graphOut.skyLasers ?? []);
+    writeNooks(graphOut.nooks);
 
     const enc = device.createCommandEncoder();
     // march -> A, blur A -> B (horizontal), blur B -> A (vertical); the main pass reads A.
@@ -815,6 +852,24 @@ async function main() {
     device.queue.writeBuffer(laserBuf, 0, laserData);
   };
 
+  // Nook lights: each sits a little in front of the rock at its picture position (toward the camera, so
+  // it's in the nook's open air). Pool size is relative to the picture, not feet: the canyon is miles deep. Up to 8 render, brightest first; the first 3 get shadows.
+  // Placement mode (N) shows them all.
+  const writeNooks = (N: RenderOut["nooks"]) => {
+    nookData.fill(0);
+    const all = (N?.lights ?? []).map((l) => (nookPlacing ? { ...l, level: 0.6 } : l));
+    const lit = all.filter((l) => l.level > 0.002).sort((a, b) => b.level - a.level).slice(0, 8);
+    lit.forEach((l, i) => {
+      const z = depthAt(l.u, l.v);
+      const radius = N!.size * tanHalfFov * aspect * z;
+      const pos = viewPos(l.u, l.v, Math.max(z * 0.05, z - N!.standoff * radius));
+      const k = N!.intensity * l.level;
+      nookData.set([...pos, radius, ...(N!.color.map((c) => c * k) as Vec3), 0], 4 + i * 8);
+    });
+    nookCount[0] = lit.length;
+    device.queue.writeBuffer(nookBuf, 0, nookData);
+  };
+
   // B: render 120 frames at 1080p back to back and log the average GPU time per frame.
   const benchmark = async () => {
     setSize(1920, 1080);
@@ -896,7 +951,8 @@ async function main() {
     return (
       `${trackName}  ${audio.paused ? "paused" : "playing"}  ${time.toFixed(2)} s  bar ${music.bar(time).toFixed(2)}  ` +
 `${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
-      `space play · J L seek · { } offset · A auto light · G music monitor\n`
+      `space play · J L seek · { } offset · A auto light · G music monitor · N place nook lights\n` +
+      (nookPlacing ? `PLACING NOOK LIGHTS: click to add · shift/right-click to remove · N when done · Save in the monitor (G)\n` : "")
     );
   };
   requestAnimationFrame(frame);

@@ -17,6 +17,11 @@ Version 2. The file holds:
     sub         0..1 kick and sub-bass (25-65 Hz): drops out before techno drops
     bass        0..1 energy under ~150 Hz, same rate
     hats        [time, strength] of high-frequency hits (hats, shakers), for flicker
+    sounds      {name: [[time, strength], ...]}: sounds named by example (see --sound), found wherever they play
+
+Named sounds: point at one instance and name it; it's remembered in tracks/<track>.sounds.json.
+    python tools/audio_analysis.py tracks/song.m4a --sound tick@0.615 --sound tock@1.817
+    (name@seconds, optionally @stem: drums, bass, other or vocals; default drums)
 
 Structure (grid, phrases, sections, drops, curves) comes from music_structure.py.
 """
@@ -51,7 +56,7 @@ def load_audio(path: Path, sr: int = SR, channels: int = 1) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.float32).copy()
 
 
-def analyse(path: Path) -> dict:
+def analyse(path: Path, sounds: list[dict] = ()) -> dict:
     y, sr = load_audio(path), SR
     duration = len(y) / sr
     frame_rate = sr / HOP
@@ -88,7 +93,7 @@ def analyse(path: Path) -> dict:
     intensity_curve = np.interp(times, frame_times[: len(intensity)], intensity[: len(frame_times)])
 
     hats = find_hats(y, sr)
-    structure = analyse_structure(y, load_audio(path, sr=STEM_SR, channels=2).reshape(-1, 2), duration)
+    structure = analyse_structure(y, load_audio(path, sr=STEM_SR, channels=2).reshape(-1, 2), duration, sounds)
     r3 = lambda a: [round(float(b), 3) for b in a]
     return {
         "version": 2,
@@ -107,6 +112,7 @@ def analyse(path: Path) -> dict:
         "sub": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in sub_curve]},
         "intensity": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in intensity_curve]},
         "hats": hats,
+        "sounds": structure["sounds"],
         "debug": structure["debug"],
     }
 
@@ -126,15 +132,25 @@ def find_hats(y: np.ndarray, sr: int) -> list[list[float]]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("tracks", type=Path, nargs="+")
+    ap.add_argument("--sound", action="append", default=[], metavar="NAME@SECONDS[@STEM]", help="name a sound by one example of it")
     args = ap.parse_args()
     for track in args.tracks:
-        result = analyse(track)
+        side = track.with_name(track.name + ".sounds.json")
+        sounds = json.loads(side.read_text()) if side.exists() else []
+        for spec in args.sound:
+            name, at, *stem = spec.split("@")
+            sounds = [s for s in sounds if s["name"] != name] + [{"name": name, "at": float(at), "stem": stem[0] if stem else "drums"}]
+        if args.sound:
+            side.write_text(json.dumps(sounds, indent=1))
+        result = analyse(track, sounds)
         out = track.with_name(track.name + ".analysis.json")
         out.write_text(json.dumps(result, separators=(",", ":")))
         summary = ", ".join(f"{s['kind']} {s['start']:.1f}-{s['end']:.1f}" for s in result["sections"])
         drops = ", ".join(f"{d['t']:.2f} ({d['confidence']:.2f})" for d in result["drops"])
         grid = "steady grid" if result["grid"]["confident"] else "NO reliable grid"
-        print(f"{track.name}: {result['tempo']} BPM ({grid}), {len(result['beats'])} beats -> {out.name}\n  {summary}\n  drops: {drops}")
+        named = ", ".join(f"{k} x{len(v)}" for k, v in result["sounds"].items())
+        print(f"{track.name}: {result['tempo']} BPM ({grid}), {len(result['beats'])} beats -> {out.name}\n  {summary}\n  drops: {drops}"
+              + (f"\n  sounds: {named}" if named else ""))
 
 
 if __name__ == "__main__":

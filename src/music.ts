@@ -17,6 +17,7 @@ export interface Analysis {
   phrases?: { bars_per_phrase: number; starts: number[] };
   drops?: Drop[];
   curves?: { rate: number; energy: number[]; tension: number[]; build: number[] };
+  sounds?: Record<string, [number, number][]>; // named by example: [time, strength]
 }
 
 export interface Drop {
@@ -244,6 +245,11 @@ export class Music {
   nextDrop(t: number): { drop: Drop | null; until: number } {
     const d = this.drops().find((d) => d.t > t);
     return d ? { drop: d, until: d.t - t } : { drop: null, until: Infinity };
+  }
+
+  /** Hits of a sound named by example (tools/audio_analysis.py --sound), [time, strength], sorted. */
+  sound(name: string): [number, number][] {
+    return this.a.sounds?.[name.trim()] ?? [];
   }
 
   /** 1 when the beat grid can be trusted, 0 for drumless tracks without one (version 1 files: 1). */

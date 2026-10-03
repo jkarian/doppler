@@ -125,6 +125,31 @@ fn lightAt(p: vec3f) -> LightHit {
 @group(0) @binding(6) var shadowTex: texture_2d<f32>;  // half-res light visibility, in image space (see fs_shadow)
 @group(0) @binding(7) var raysTex: texture_2d<f32>;    // half-res sun shafts, in image space (see fs_rays)
 
+// Nook lights: up to 8 small lights tucked into the rock, each washing a pool of light over the walls
+// around it. The display sorts them brightest first; the first 3 get shadows (rock jutting out between
+// the light and a wall cuts the pool off), carried in the shadow texture's g, b, a.
+struct Nook {
+  pos: vec3f,
+  radius: f32,   // the pool's reach, scene units: light falls to nothing there
+  color: vec3f,  // colour x intensity x level
+  pad: f32,
+};
+struct Nooks {
+  count: u32,
+  pad0: u32,
+  pad1: u32,
+  pad2: u32,
+  l: array<Nook, 8>,
+};
+@group(0) @binding(9) var<storage, read> nooks: Nooks;
+
+// Bright at the light, easing to nothing at the radius.
+fn nookFall(d: f32, r: f32) -> f32 {
+  let x = d / r;
+  let w = max(0.0, 1.0 - x * x);
+  return w * w / (1.0 + 2.0 * x * x);
+}
+
 // Lasers: up to 4 fixtures of up to 24 beams. Beam directions and lengths (to the first rock they hit)
 // are worked out on the CPU each frame; this only draws them.
 struct Laser {
@@ -394,9 +419,15 @@ fn fs_shadow(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let z = depthNearest(uv);
   if (u.shadows < 0.5 || z >= u.far * u.skyCut) { return vec4f(1.0); }
   let p = viewPos(uv, z);
+  var vis = vec4f(1.0);
   let hit = lightAt(p);
-  if (hit.amount <= 0.0) { return vec4f(1.0); }  // outside the beam: nothing to shadow
-  return vec4f(shadowAt(p, hit.l, hit.dist, frag.xy));
+  if (hit.amount > 0.0) { vis.x = shadowAt(p, hit.l, hit.dist, frag.xy, u.sun > 0.5); }  // outside the beam: nothing to shadow
+  for (var i = 0u; i < min(nooks.count, 3u); i++) {
+    let toL = nooks.l[i].pos - p;
+    let d = length(toL);
+    if (d < nooks.l[i].radius && d > 1e-4) { vis[i + 1u] = shadowAt(p, toL / d, d, frag.xy, false); }
+  }
+  return vis;
 }
 
 // Sun shafts: light scattered by the air toward the camera, wherever the line from a pixel toward the
@@ -441,7 +472,7 @@ fn fs_blur(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let uv = frag.xy / size;
   let z0 = depthNearest(uv);
   let step = select(vec2i(0, 1), vec2i(1, 0), HORIZONTAL);
-  var sum = 0.0;
+  var sum = vec4f(0.0);
   var wsum = 0.0;
   for (var k = -R; k <= R; k++) {
     let t = clamp(texel + step * k, vec2i(0), vec2i(size) - 1);
@@ -449,20 +480,19 @@ fn fs_blur(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     // Gaussian in distance, and nearly zero across a depth jump of more than a few percent.
     let dz = (zk - z0) / (0.03 * z0);
     let w = exp(-f32(k * k) / 4.5) * exp(-dz * dz);
-    sum += w * textureLoad(shadowTex, t, 0).r;
+    sum += w * textureLoad(shadowTex, t, 0);
     wsum += w;
   }
-  return vec4f(sum / wsum);
+  return sum / wsum;
 }
 
 // March from the surface toward the light and look for depth in the way.
-fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f) -> f32 {
+fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool) -> f32 {
   const STEPS = 64;  // more steps, less jitter to blur away
   // Fixed per-pixel jitter (interleaved gradient noise) breaks step aliasing into fine grain. No time term: same frame every run.
   let jitter = fract(52.9829189 * fract(dot(frag, vec2f(0.06711056, 0.00583715))));
   // March all the way to the light: the beam must stop at the first surface it meets, near or far.
   let maxLen = dist;
-  let enclosed = u.sun > 0.5;
   var lit = 1.0;
   for (var s = 1; s <= STEPS; s++) {
     let t = (f32(s) - jitter) / f32(STEPS);
@@ -518,9 +548,20 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   let hit = lightAt(p);
   // Slight wrap so rough AI-derived normals don't go hard black at the terminator.
   let ndl = clamp((dot(n, hit.l) + 0.15) / 1.15, 0.0, 1.0);
-  let shadow = select(textureSampleLevel(shadowTex, samp, uv, 0.0).r, 1.0, u.shadows < 0.5);
+  var vis = select(textureSampleLevel(shadowTex, samp, uv, 0.0), vec4f(1.0), u.shadows < 0.5);
+  let shadow = vis.r;
   let haze = exp(-u.hazeBeta * z);
-  let light = select(u.lightColor * (u.intensity * ndl * hit.amount * shadow * haze), vec3f(0.0), sky);
+  var nook = vec3f(0.0);
+  for (var i = 0u; i < min(nooks.count, 8u); i++) {
+    let toL = nooks.l[i].pos - p;
+    let d = length(toL);
+    if (d < nooks.l[i].radius) {
+      let nl = clamp((dot(n, toL / max(d, 1e-4)) + 0.15) / 1.15, 0.0, 1.0);
+      let sh = select(1.0, vis[min(i, 2u) + 1u], i < 3u);
+      nook += nooks.l[i].color * (nookFall(d, nooks.l[i].radius) * nl * sh);
+    }
+  }
+  let light = select(u.lightColor * (u.intensity * ndl * hit.amount * shadow * haze) + nook * haze, vec3f(0.0), sky);
 
   // Base: the de-lit rock under soft night-sky light from above (cool) and bounce from below (warm),
   // so the photo's own daylight, haze and sun shafts don't show. `baked` mixes the photo back in.

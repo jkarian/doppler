@@ -461,9 +461,59 @@ def curves(duration: float, bars: np.ndarray, E: np.ndarray, sections: list[dict
     }
 
 
+# --- Named sounds ----------------------------------------------------------------------------
+
+def find_sounds(stems: dict[str, np.ndarray], examples: list[dict], iterations: int = 150) -> dict[str, list[list[float]]]:
+    """Every occurrence of sounds named by example: [{"name": "tick", "at": 0.615, "stem": "drums"}, ...].
+    People hear instruments, not frequencies, so a sound is defined by pointing at one instance of it.
+
+    Each example's spectrum (what starts at that moment, minus what was already playing) becomes a fixed
+    template. The stem's spectrogram is then explained as a mix of the templates plus free components
+    for everything else (NMF), so a sound is still found when other instruments play over it. Hits are
+    peaks in a template's activation; where two named sounds hit at once, the stronger one keeps it.
+    Returns {name: [[time, strength 0..1], ...]}."""
+    hop = 256
+    fps = FEAT_SR / hop
+    out: dict[str, list[list[float]]] = {}
+    by_stem: dict[str, list[dict]] = {}
+    for ex in examples:
+        by_stem.setdefault(ex.get("stem", "drums"), []).append(ex)
+    rng = np.random.default_rng(0)
+    for stem, exs in by_stem.items():
+        V = librosa.feature.melspectrogram(y=stems[stem], sr=FEAT_SR, n_fft=2048, hop_length=hop, n_mels=64, fmin=200, fmax=11000, power=1.0) + 1e-6
+        temps = []
+        for ex in exs:
+            i = int(ex["at"] * fps)
+            w = np.maximum(V[:, i:i + 3].mean(1) - V[:, max(0, i - 6):max(1, i - 2)].mean(1), 0) + 1e-6
+            temps.append(w / np.linalg.norm(w))
+        n = len(temps)
+        W = np.concatenate([np.stack(temps, 1), rng.random((V.shape[0], 24))], 1)
+        H = rng.random((W.shape[1], V.shape[1]))
+        for _ in range(iterations):  # KL multiplicative updates; the named templates stay fixed
+            H *= (W.T @ (V / (W @ H + 1e-9))) / (W.sum(0)[:, None] + 1e-9)
+            Wn = W * ((V / (W @ H + 1e-9)) @ H.T) / (H.sum(1)[None, :] + 1e-9)
+            W[:, n:] = Wn[:, n:] / (np.linalg.norm(Wn[:, n:], axis=0) + 1e-9)
+        acts = [H[k] / (np.percentile(H[k], 99.5) + 1e-9) for k in range(n)]
+        hits = []
+        for k, (ex, h) in enumerate(zip(exs, acts)):
+            pk = librosa.util.peak_pick(h, pre_max=4, post_max=4, pre_avg=20, post_avg=20, delta=0.15, wait=20)
+            hits += [(pk_ / fps, float(min(1.0, h[pk_])), k) for pk_ in pk]
+        hits.sort()
+        kept: list[tuple[float, float, int]] = []
+        for h in hits:  # simultaneous hits of different sounds: the stronger wins
+            if kept and h[0] - kept[-1][0] < 0.05 and h[2] != kept[-1][2]:
+                if h[1] > kept[-1][1]:
+                    kept[-1] = h
+                continue
+            kept.append(h)
+        for k, ex in enumerate(exs):
+            out[ex["name"]] = [[round(t, 3), round(v, 2)] for t, v, kk in kept if kk == k]
+    return out
+
+
 # --- Entry point ------------------------------------------------------------------------------
 
-def analyse_structure(mono22: np.ndarray, stereo44: np.ndarray, duration: float, log=print) -> dict:
+def analyse_structure(mono22: np.ndarray, stereo44: np.ndarray, duration: float, sounds: list[dict] = (), log=print) -> dict:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     stems = separate(stereo44, device)
     raw_beats, raw_down = track_beats(mono22, device)
@@ -513,5 +563,6 @@ def analyse_structure(mono22: np.ndarray, stereo44: np.ndarray, duration: float,
         "sections": sections,
         "drops": drops,
         "curves": curves(duration, bars, E, sections, drops, phrase_starts),
+        "sounds": find_sounds(stems, list(sounds)) if sounds else {},
         "debug": {"bar_energy": [round(float(x), 3) for x in E], "novelty": [round(float(x), 3) for x in nov]},
     }
