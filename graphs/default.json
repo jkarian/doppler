@@ -213,43 +213,6 @@
    }
   },
   {
-   "id": "dawn",
-   "type": "Color",
-   "pos": [
-    300,
-    536
-   ],
-   "name": "Dawn",
-   "params": {
-    "r": 1,
-    "g": 0.55,
-    "b": 0.3
-   }
-  },
-  {
-   "id": "noon",
-   "type": "Color",
-   "pos": [
-    300,
-    692
-   ],
-   "name": "Noon",
-   "params": {
-    "r": 1,
-    "g": 0.95,
-    "b": 0.88
-   }
-  },
-  {
-   "id": "sunColor",
-   "type": "MixColor",
-   "pos": [
-    620,
-    956
-   ],
-   "name": "Sun colour"
-  },
-  {
    "id": "sun",
    "type": "Sun",
    "pos": [
@@ -782,6 +745,28 @@
     1260,
     450
    ]
+  },
+  {
+   "id": "sunTint",
+   "type": "SunTint",
+   "name": "Sun colour by height",
+   "params": {
+    "warmth": 1
+   },
+   "pos": [
+    620,
+    956
+   ]
+  },
+  {
+   "id": "sky",
+   "type": "Sky",
+   "name": "Sky",
+   "params": {},
+   "pos": [
+    620,
+    1116
+   ]
   }
  ],
  "wires": [
@@ -1047,36 +1032,6 @@
   },
   {
    "from": [
-    "dawn",
-    "color"
-   ],
-   "to": [
-    "sunColor",
-    "a"
-   ]
-  },
-  {
-   "from": [
-    "noon",
-    "color"
-   ],
-   "to": [
-    "sunColor",
-    "b"
-   ]
-  },
-  {
-   "from": [
-    "up",
-    "value"
-   ],
-   "to": [
-    "sunColor",
-    "k"
-   ]
-  },
-  {
-   "from": [
     "arc",
     "value"
    ],
@@ -1123,16 +1078,6 @@
    "to": [
     "sun",
     "skyBoost"
-   ]
-  },
-  {
-   "from": [
-    "sunColor",
-    "color"
-   ],
-   "to": [
-    "sun",
-    "color"
    ]
   },
   {
@@ -1583,6 +1528,36 @@
    "to": [
     "nooks",
     "level"
+   ]
+  },
+  {
+   "from": [
+    "arc",
+    "value"
+   ],
+   "to": [
+    "sunTint",
+    "arc"
+   ]
+  },
+  {
+   "from": [
+    "horizon",
+    "degrees"
+   ],
+   "to": [
+    "sunTint",
+    "horizon"
+   ]
+  },
+  {
+   "from": [
+    "sunTint",
+    "color"
+   ],
+   "to": [
+    "sun",
+    "color"
    ]
   }
  ]

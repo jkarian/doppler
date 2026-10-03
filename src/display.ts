@@ -222,7 +222,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 56;
+  const UNIFORM_FLOATS = 64;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
   const LASER_FLOATS = 4 + 4 * 24 + 192 * 4;
   const laserData = new Float32Array(LASER_FLOATS);
@@ -862,6 +862,7 @@ async function main() {
       look.sun ? 1 : 0, look.rays, caveDepth, 0,
       ...sunScreen(look), look.sun ? skyBoost : 0, sunFloor,
       ...scanUniforms(graphOut.scan),
+      ...skyUniforms(),
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
@@ -899,6 +900,16 @@ async function main() {
     pass.draw(grid[0] * grid[1] * 6);
     pass.end();
     device.queue.submit([enc.finish()]);
+  };
+
+  // Sky gradient: follows the sun's height above the lowest open sky (the gap's horizon), even while the
+  // sun itself is switched off, so the sky keeps its colour.
+  const skyUniforms = (): number[] => {
+    const S = graphOut.sky;
+    if (!S) return [0, 0, 0, 0, 0, 0, 1, 0];
+    const arc = graphOut.sun?.arc ?? look.sunElevation;
+    const elev = arc <= 90 ? arc : 180 - arc;
+    return [S.mix, S.brightness, S.clouds, S.glow, elev - gapHorizon, (gapHorizon * Math.PI) / 180, (S.span * Math.PI) / 180, 0];
   };
 
   // Scan: map the node's 0..1 position and spacing onto the land's range on its axis

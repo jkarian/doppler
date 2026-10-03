@@ -99,7 +99,17 @@ export interface NookOut {
   intensity: number;
 }
 
+/** The sky as a gradient that follows the sun's height (see Sky). */
+export interface SkyOut {
+  mix: number; // 0 = the photo's sky, 1 = the gradient
+  brightness: number;
+  clouds: number; // 0..1: the photo's clouds kept as texture on the gradient
+  glow: number; // warm glow around the sun
+  span: number; // degrees from the lowest open sky to where the gradient reaches its top colour
+}
+
 export interface RenderOut {
+  sky?: SkyOut;
   nooks?: NookOut;
   scan?: ScanOut;
   lasers?: LaserOut[];
@@ -545,6 +555,39 @@ const defs: NodeDef[] = [
     },
   },
 
+  {
+    type: "SunTint",
+    category: "Value",
+    doc:
+      "The sun's colour for its height above the horizon (arc minus horizon, degrees), as in real life: deep red-orange " +
+      "at the horizon, orange, gold, then near white once it's well up. warmth 0..2 shifts the whole range (1 = real).",
+    inputs: [
+      { name: "arc", default: 20 },
+      { name: "horizon", default: 0 },
+      { name: "warmth", default: 1, min: 0, max: 2, step: 0.05 },
+    ],
+    outputs: ["color"],
+    eval: (i) => {
+      // Height (degrees) -> linear RGB, from photos of the sun through a low, clean atmosphere.
+      const stops: [number, number[]][] = [
+        [0, [1, 0.28, 0.06]],
+        [3, [1, 0.42, 0.13]],
+        [8, [1, 0.6, 0.28]],
+        [15, [1, 0.76, 0.48]],
+        [25, [1, 0.87, 0.68]],
+        [40, [1, 0.95, 0.86]],
+        [60, [1, 0.98, 0.95]],
+      ];
+      const h = (num(i.arc) - num(i.horizon)) / Math.max(0.05, num(i.warmth));
+      let k = 0;
+      while (k < stops.length - 2 && h > stops[k + 1][0]) k++;
+      const [h0, c0] = stops[k];
+      const [h1, c1] = stops[k + 1];
+      const f = clamp((h - h0) / (h1 - h0), 0, 1);
+      return { color: c0.map((x, j) => x + (c1[j] - x) * f) };
+    },
+  },
+
   // --- Outputs ----------------------------------------------------------------------------
   {
     type: "Sun",
@@ -819,6 +862,30 @@ const defs: NodeDef[] = [
       ctx.out.nooks = {
         lights: s.pts.map(([u, v, r, b], k) => ({ u, v, r, b, level: lv[k] * level })),
         radius: Math.max(1, num(i.radius)), standoff: Math.max(0, num(i.standoff)), color: vec(i.color), intensity: Math.max(0, num(i.intensity)),
+      };
+      return {};
+    },
+  },
+  {
+    type: "Sky",
+    category: "Output",
+    doc:
+      "Paints the sky as a gradient that follows the sun, like real dusk to day: with the sun at the horizon, deep navy " +
+      "overhead through blue and lavender to pink low down; as it climbs, a golden glow, then daytime blue. The gradient " +
+      "runs from the lowest open sky (above the mountains) up span degrees. mix 0 keeps the photo's sky; clouds keeps the " +
+      "photo's clouds as texture; glow warms the sky around the sun.",
+    inputs: [
+      { name: "mix", default: 1, min: 0, max: 1, step: 0.05 },
+      { name: "brightness", default: 3, min: 0, max: 20, step: 0.1 },
+      { name: "clouds", default: 0.6, min: 0, max: 1, step: 0.05 },
+      { name: "glow", default: 0.4, min: 0, max: 3, step: 0.05 },
+      { name: "span", default: 25, min: 3, max: 90, step: 1, doc: "degrees" },
+    ],
+    outputs: [],
+    eval: (i, ctx) => {
+      ctx.out.sky = {
+        mix: clamp(num(i.mix), 0, 1), brightness: Math.max(0, num(i.brightness)), clouds: clamp(num(i.clouds), 0, 1),
+        glow: Math.max(0, num(i.glow)), span: Math.max(1, num(i.span)),
       };
       return {};
     },

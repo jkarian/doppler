@@ -60,7 +60,7 @@ Defined in `src/graph/nodes.ts` (each with a one-line doc shown in the editor). 
 |---|---|
 | Music | Time, Beat, Bar, Phrase, Sound, Intensity, Loudness, Bass, Pump, Hats, Section, DropHit, Tension, Spurts, Gate |
 | Scene | GapHorizon |
-| Value | Number, Color |
+| Value | Number, Color, SunTint |
 | Setup | Setup |
 | Shape | Expression, Add, Multiply, Remap, Oscillator, MixColor |
 | Output | Sun, Camera, Tone |
@@ -100,6 +100,7 @@ Output nodes write the renderer's parameters. Anything a graph doesn't set keeps
 | Sun | `gain` (brightness multiplier), `floorLight` (0..1: sun on flat ground; 0 = walls only), `maxArc` soft ceiling (degrees; eases in over the last 6), `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
 | Camera | `swayX`, `swayY`, `pushZ` in units of the display's sway amount (pushZ is clamped to ≥ 0) |
 | Tone | `baseDim`, `baked`, `cap` |
+| Sky | `mix` (0 photo sky, 1 gradient), `brightness`, `clouds`, `glow`, `span` (degrees): a dusk-to-day gradient that follows the sun's height |
 | Sync | `lead` (ms, positive = visuals earlier than the audio; keys `{ }` on the display) |
 | NookLights | `positions` (u,v[,area,brightness]; ...), `sounds` (names, `|`-separated, fire the mid and far lights), `pattern`, `seed`, `attack`, `decay`, `near` (feet: nearer lights wait for big moments), `moments` (drops and/or phrases), `nearDecay`, `radius` (feet; each light can scale its area and brightness: `u,v,area,brightness`), `standoff`, `color`, `intensity`, `level` |
 

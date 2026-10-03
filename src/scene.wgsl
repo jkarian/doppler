@@ -38,7 +38,38 @@ struct Uniforms {
   scan: vec4f,         // MRI scan: axis (0 depth, 1 height, 2 sideways), front position, spacing, thickness (in axis units)
   scanColor: vec4f,    // rgb, intensity
   scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), -
+  skyA: vec4f,         // sky gradient: mix with the photo, brightness, clouds, glow around the sun
+  skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), -
 };
+
+// The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
+// top (t 1): dusk (the sun at the horizon), golden (about 14 degrees up), day (35 and higher).
+const SKY_T = array(0.0, 0.08, 0.16, 0.25, 0.45, 1.0);
+const SKY_DUSK = array(vec3f(0.79, 0.24, 0.35), vec3f(0.90, 0.48, 0.53), vec3f(0.58, 0.49, 0.68), vec3f(0.22, 0.30, 0.62), vec3f(0.013, 0.036, 0.25), vec3f(0.0012, 0.0022, 0.018));
+const SKY_GOLD = array(vec3f(1.0, 0.55, 0.22), vec3f(0.95, 0.62, 0.38), vec3f(0.70, 0.60, 0.58), vec3f(0.40, 0.45, 0.66), vec3f(0.12, 0.20, 0.50), vec3f(0.03, 0.07, 0.25));
+const SKY_DAY = array(vec3f(0.75, 0.82, 0.90), vec3f(0.62, 0.74, 0.90), vec3f(0.48, 0.64, 0.88), vec3f(0.36, 0.55, 0.86), vec3f(0.20, 0.40, 0.80), vec3f(0.08, 0.22, 0.62));
+
+fn skyRamp(t: f32, look: i32) -> vec3f {
+  var c = vec3f(0.0);
+  for (var k = 0; k < 5; k++) {
+    if (t >= SKY_T[k] && t <= SKY_T[k + 1]) {
+      let f = (t - SKY_T[k]) / (SKY_T[k + 1] - SKY_T[k]);
+      if (look == 0) { c = mix(SKY_DUSK[k], SKY_DUSK[k + 1], f); }
+      else if (look == 1) { c = mix(SKY_GOLD[k], SKY_GOLD[k + 1], f); }
+      else { c = mix(SKY_DAY[k], SKY_DAY[k + 1], f); }
+    }
+  }
+  return c;
+}
+
+fn skyGradient(uv: vec2f) -> vec3f {
+  let dir = normalize(viewPos(uv, 1.0));
+  let t = clamp((asin(dir.y) - u.skyB.y) / u.skyB.z, 0.0, 1.0);
+  let s = u.skyB.x;
+  let toGold = smoothstep(2.0, 14.0, s);
+  let toDay = smoothstep(14.0, 35.0, s);
+  return mix(mix(skyRamp(t, 0), skyRamp(t, 1), toGold), skyRamp(t, 2), toDay);
+}
 
 // MRI-style scan: slices of constant depth (log distance), height or sideways position, sweeping
 // through the scene. Each slice lights a thin line where it cuts the rock; trailing slices fade.
@@ -586,7 +617,21 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   // so the photo's own daylight, haze and sun shafts don't show. `baked` mixes the photo back in.
   // The sky itself keeps the photo.
   let ambient = mix(vec3f(0.18, 0.14, 0.12), vec3f(0.42, 0.50, 0.65), 0.5 + 0.5 * n.y);
-  let base = select(mix(albedo * ambient, photo, u.baked), photo * (1.0 + u.skyBoost), sky);
+  var skyColor = photo;
+  if (sky && u.skyA.x > 0.0) {
+    // The gradient, with the photo's clouds kept as texture (its brightness against its own blurred self).
+    let lum = dot(photo, vec3f(0.2126, 0.7152, 0.0722));
+    let soft = dot(textureSampleLevel(photoTex, samp, uv, 5.0).rgb, vec3f(0.2126, 0.7152, 0.0722));
+    var g = skyGradient(uv) * mix(1.0, clamp(lum / max(soft, 1e-4), 0.3, 2.5), u.skyA.z) * u.skyA.y;
+    // Warm glow around the sun, wider and stronger when it's low.
+    if (u.sun > 0.5) {
+      let c = dot(normalize(viewPos(uv, 1.0)), normalize(u.lightPos));
+      let low = 1.0 - smoothstep(0.0, 30.0, u.skyB.x);
+      g += u.lightColor * u.skyA.w * (exp((c - 1.0) * 60.0) + 0.5 * low * exp((c - 1.0) * 8.0));
+    }
+    skyColor = mix(photo, g, u.skyA.x);
+  }
+  let base = select(mix(albedo * ambient, photo, u.baked), skyColor * (1.0 + u.skyBoost), sky);
   var color = base * u.baseDim + albedo * light;
 
   // Sun shafts: only in the open air beyond the cave mouth, so they never veil the near walls.
