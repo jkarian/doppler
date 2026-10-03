@@ -160,13 +160,13 @@ struct LaserLight {
   rock: vec3f,
 };
 
-// Brightness across a beam at angle `ang` from its centre: a solid core (100%) as wide as the beam,
-// with a soft anti-aliased edge; right outside it the glow starts at 40% and falls to 0 over
-// `glow` beam widths: quickly at first, then a long faint tail into the haze.
+// Brightness across a beam at angle `ang` from its centre: a solid hard-edged core (100%) as wide as
+// the beam; right outside it the glow starts at half that (so the core pops out of it) and falls to 0
+// over `glow` beam widths: quickly at first, then a long faint tail into the haze.
 fn beamProfile(ang: f32, width: f32, glow: f32) -> f32 {
-  let core = 1.0 - smoothstep(width * 0.35, width * 0.65, ang);
+  let core = 1.0 - smoothstep(width * 0.45, width * 0.55, ang);
   let y = max(0.0, ang - width * 0.5) / (width * glow);
-  let tail = 0.4 * (0.75 * exp(-y / 0.04) + 0.25 * exp(-y / 0.25));
+  let tail = 0.5 * (0.75 * exp(-y / 0.04) + 0.25 * exp(-y / 0.25));
   return core + (1.0 - core) * tail;
 }
 
@@ -246,7 +246,9 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         }
       }
       // A sheet reads as a plane: its individual beams fade back.
-      g += 3.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
+      // Level set so the core lands near full white and the glow stays below it: if both clipped to
+      // white they'd merge into one soft band.
+      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
