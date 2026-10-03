@@ -14,7 +14,7 @@ nodes, built "while eating our lunch", with a possible move to native Rust + wgp
 
 Repo renamed from `doppler` to `doppler-canyon` (github.com/jkarian/doppler-canyon) on 2026-10-03. The name
 "Doppler" is reserved for the planned plain-language node tool ([brief](brief-plain-language-nodes.md)); this
-visualizer is meant to become its first scene. The local folder is still `D:\Projects\doppler`.
+visualizer is meant to become its first scene. The local folder is `D:\Projects\doppler-canyon`.
 
 ## Running it
 
