@@ -58,11 +58,16 @@ Defined in `src/graph/nodes.ts` (each with a one-line doc shown in the editor). 
 
 | Category | Types |
 |---|---|
-| Music | Time, Beat, Bar, Intensity, Loudness, Bass, Pump, Hats, Section, DropHit, Spurts, Gate |
+| Music | Time, Beat, Bar, Phrase, Intensity, Loudness, Bass, Pump, Hats, Section, DropHit, Tension, Spurts, Gate |
 | Scene | GapHorizon |
 | Value | Number, Color |
 | Shape | Expression, Add, Multiply, Remap, Oscillator, MixColor |
 | Output | Sun, Camera, Tone |
+
+Version 2 analysis files (`tools/audio_analysis.py`) add the phrase grid, drops with confidence, and
+tension/energy curves (`Phrase`, `Tension`, `DropHit`'s `strength`/`ahead`/`windup`, `Beat`'s `confidence`).
+With a version 1 file those fall back: phrases every 8 bars from the first downbeat, tension 0, every drop
+section's start a drop with confidence 1. Section kinds intro, breakdown and outro count as quiet.
 
 Without a track, music nodes return neutral values (intensity 1, pump 0, gate 1, section "normal",
 bars advance at 2 s per bar), so graphs still run.

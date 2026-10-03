@@ -35,8 +35,13 @@ npm run dev
   depth (Depth Anything V2 at 1022 for shape, Depth Pro for scale and lens, SegFormer sky mask, distant
   mountains pushed back x4), tiled Marigold normals. Current scene: `images/canyon Topaz Gigapixel 4x scale.png`
   (Photoshop generative expand to 16:9, Topaz 4x) -> `scenes/canyon` at 3840x2160.
-- `tools/audio_analysis.py`: beats (aligned to bass hits, ~5 ms), bars, loudness, bass, kick (sub), intensity
-  (loudness + brightness, for flat-mastered tracks), hats, sections (quiet/build/drop/normal).
+- `tools/audio_analysis.py` + `tools/music_structure.py` (analysis v2, 2026-10-03): HTDemucs stems, Beat This!
+  beats fitted to constant-tempo pieces and refitted to the kick (test track within 1 ms), 8-bar phrase grid,
+  sections intro/build/drop/breakdown/normal/outro from stem novelty + per-track energy, drops with confidence,
+  tension/energy/build curves, grid confidence (Bliss: no reliable grid). Plus loudness, bass, kick (sub),
+  intensity, hats. About 5 s per track. `tools/shims/torchaudio` stands in for torchaudio (no build for torch
+  2.14). v1 files are kept in `captures/analysis-v1/`. Tuned on our 4 tracks only; All-In-One could be added
+  as an extra boundary voter if new tracks come out wrong.
 - `src/display.ts` + `src/scene.wgsl`: WebGPU renderer. Depth-displaced mesh, camera with parallax sway,
   image-space shadows (enclosed "cave" rules for the sun), shafts, flare, lasers, scan, brightness cap,
   mipmaps. ~4.4 ms/frame at 1080p on the 4090.
@@ -67,7 +72,8 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
   layer, or camera-mapped geometry from Maya (the user can do this).
 - Far canyon depth is smooth/approximate; contour and scan lines get blobby there (hence `reach`). The
   distant-mountain mask leaks a strip down the canyon centre; trim it when depth is next touched.
-- Bliss (first track) loses its first drop's sun with the intensity-based gate. Low priority.
+- Bliss (first track) loses its first drop's sun with the intensity-based gate, and has no reliable beat grid
+  (no drums); beat-locked effects should multiply by `Beat.confidence`. Low priority.
 - Old spotlight mode isn't graph-driven.
 
 ## Research (2026-10-03, overnight)
@@ -83,6 +89,11 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 - Test scripts, outputs and Windows workarounds for both are kept locally in `captures/research/`.
 
 ## Backlog / ideas
+
+- Use the new tension/phrase/drop signals in the look (wind-up before drops, blackout in gap bars,
+  laser pattern changes on phrase lines). Not wired into the default graph yet.
+- Camera mapping next: MoGe depth first; if not good enough, a separate "Regenerate from depth" step/node
+  (depth-conditioned image generation, optional, not the default path).
 
 0. The plain-language node brief has a paper exercise for the user to do before any code.
 
