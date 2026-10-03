@@ -745,8 +745,10 @@ async function main() {
           if (z < info.far * 0.9 && z >= S.minDepth) break; // on rock, out in the canyon, not sky
         }
         const target = viewPos(u, v);
-        const lean = S.tilt * rad * rand();
-        const turn = 2 * Math.PI * rand();
+        // Sway while lit: the sky end swings, the landing spot stays put. Each beam out of step.
+        const phase = 2 * Math.PI * (S.driftSpeed * S.t) + bi * 1.7;
+        const lean = S.tilt * rad * rand() + S.drift * rad * Math.sin(phase);
+        const turn = 2 * Math.PI * rand() + 0.6 * Math.sin(phase * 0.7 + 1.1);
         const o: Vec3 = [target[0] + Math.sin(lean) * Math.cos(turn) * height, target[1] + Math.cos(lean) * height, target[2] + Math.sin(lean) * Math.sin(turn) * height];
         const len = Math.hypot(target[0] - o[0], target[1] - o[1], target[2] - o[2]);
         const d = normalize([target[0] - o[0], target[1] - o[1], target[2] - o[2]]);

@@ -554,7 +554,7 @@
     "axis": 0,
     "lines": 1,
     "thickness": 0.5,
-    "trail": 1
+    "trail": 80
    }
   },
   {

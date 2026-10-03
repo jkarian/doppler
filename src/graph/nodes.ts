@@ -37,6 +37,9 @@ export interface SkyLaserOut {
   vMax: number;
   minDepth: number; // only land on rock at least this far away (keeps them out in the canyon)
   tilt: number; // degrees of random lean away from vertical
+  drift: number; // degrees each beam sways while lit (pivoting on its landing spot)
+  driftSpeed: number; // sways per second
+  t: number; // time, for the sway
   sheet: number; // 0: beams; 1: vertical curtains of light
   sheetWidth: number; // degrees wide, for curtains
   fade: number; // brightness falls with the trigger's phase: exp(-phase * fade)
@@ -481,6 +484,8 @@ const defs: NodeDef[] = [
       { name: "vMax", default: 0.9, min: 0, max: 1, step: 0.01 },
       { name: "minDepth", default: 3, min: 0, step: 0.1, doc: "only land on rock at least this far away" },
       { name: "tilt", default: 12, min: 0, max: 60, step: 0.5 },
+      { name: "drift", default: 3, min: 0, max: 30, step: 0.1, doc: "degrees each beam sways, pivoting on its landing spot" },
+      { name: "driftSpeed", default: 0.2, min: 0, max: 5, step: 0.01, doc: "sways per second" },
       { name: "sheet", default: 0, min: 0, max: 1, step: 0.05 },
       { name: "sheetWidth", default: 6, min: 0.5, max: 60, step: 0.5 },
       { name: "fade", default: 2, min: 0, max: 20, step: 0.1 },
@@ -497,6 +502,7 @@ const defs: NodeDef[] = [
       (ctx.out.skyLasers ??= []).push({
         count: Math.round(clamp(num(i.count), 1, 24)), trigger: num(i.trigger), seed: num(i.seed),
         uMin: num(i.uMin), uMax: num(i.uMax), vMin: num(i.vMin), vMax: num(i.vMax), minDepth: Math.max(0, num(i.minDepth)), tilt: Math.max(0, num(i.tilt)),
+        drift: Math.max(0, num(i.drift)), driftSpeed: Math.max(0, num(i.driftSpeed)), t: ctx.t,
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
         width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
       });
@@ -516,7 +522,7 @@ const defs: NodeDef[] = [
       { name: "lines", default: 1, kind: "const", min: 1, max: 32, step: 1 },
       { name: "spacing", default: 0.035, min: 0.001, max: 0.5, step: 0.001 },
       { name: "thickness", default: 0.5, min: 0.01, max: 500, step: 0.1, doc: "feet, real-world scale" },
-      { name: "trail", default: 1, min: 0, max: 5000, step: 0.1, doc: "feet: glow left behind the moving line" },
+      { name: "trail", default: 80, min: 0, max: 5000, step: 1, doc: "feet: glow left behind the moving line" },
       { name: "reach", default: 0.72, min: 0.05, max: 1, step: 0.01 },
       { name: "color", default: [0.4, 0.9, 1] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },

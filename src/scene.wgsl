@@ -58,7 +58,7 @@ fn scanLight(p: vec3f) -> f32 {
     let d = c - (u.scan.y - f32(k) * u.scanLines.y);
     let core = exp(-pow(d / thick, 2.0));
     // Behind the moving line: a gentle trail that falls off.
-    let behind = select(0.0, 0.6 * exp(d / trail), d < 0.0);
+    let behind = select(0.0, 0.75 * exp(d / trail), d < 0.0);
     let fade = 1.0 - f32(k) / f32(n);
     g += max(core, behind) * fade * fade;
   }
