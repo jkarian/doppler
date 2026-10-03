@@ -73,8 +73,10 @@ def fill_opencv(img: np.ndarray, unknown: np.ndarray) -> np.ndarray:
     return np.where(unknown[..., None], soft, img)
 
 
-def fill_sdxl(img: np.ndarray, band: np.ndarray, prompt: str) -> np.ndarray:
-    """SDXL inpainting, tile by tile around the band (1024 px windows), blended back."""
+def fill_sdxl(img: np.ndarray, band: np.ndarray, unknown: np.ndarray, prompt: str) -> np.ndarray:
+    """SDXL inpainting, tile by tile around the band (1024 px windows), blended back. Besides the band, the
+    near rock right next to it is hidden from the model too, so it paints what's behind (the far side)
+    rather than more of the near rock."""
     import torch
     from diffusers import AutoPipelineForInpainting
 
@@ -82,6 +84,7 @@ def fill_sdxl(img: np.ndarray, band: np.ndarray, prompt: str) -> np.ndarray:
     out = img.copy()
     h, w = band.shape
     T = 1024
+    hide = band | (unknown & ndi.binary_dilation(band, iterations=40))
     ys, xs = np.nonzero(band)
     done = np.zeros_like(band)
     gen = torch.Generator("cuda").manual_seed(7)
@@ -93,7 +96,7 @@ def fill_sdxl(img: np.ndarray, band: np.ndarray, prompt: str) -> np.ndarray:
         y0 = int(np.clip(y - T // 4, 0, max(0, h - T)))
         x0 = int(np.clip(x - T // 2, 0, max(0, w - T)))
         tile = out[y0:y0 + T, x0:x0 + T]
-        tmask = band[y0:y0 + T, x0:x0 + T]
+        tmask = hide[y0:y0 + T, x0:x0 + T]
         res = pipe(prompt=prompt, negative_prompt="people, text, blurry", image=Image.fromarray(tile), mask_image=Image.fromarray(tmask.astype(np.uint8) * 255),
                    height=tile.shape[0], width=tile.shape[1], strength=0.99, num_inference_steps=30, guidance_scale=6.0, generator=gen).images[0]
         res = np.asarray(res.resize((tile.shape[1], tile.shape[0])))
@@ -136,11 +139,15 @@ def main() -> None:
     def load(name: str) -> np.ndarray:
         return np.asarray(Image.open(args.scene / name).convert("RGB").resize((WORK_W, h), Image.LANCZOS))
 
-    fill = fill_sdxl if args.fill == "sdxl" else (lambda img, m, *_: fill_opencv(img, m))
     images = {}
     for key, name in (("photo", info["image"]), ("albedo", info.get("albedo", info["image"]))):
         print(f"filling the {key} ({args.fill}) ...")
-        images[key] = fill(load(name), unknown if args.fill == "opencv" else band, args.prompt)
+        img = load(name)
+        if args.fill == "sdxl":
+            prompt = args.prompt if key == "photo" else args.prompt + ", flat even lighting, no shadows"
+            images[key] = fill_sdxl(img, band, unknown, prompt)
+        else:
+            images[key] = fill_opencv(img, unknown)
 
     # Full resolution: the original everywhere but the band.
     band_full = cv2.resize(band.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)

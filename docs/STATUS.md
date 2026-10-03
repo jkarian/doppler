@@ -113,9 +113,18 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 ## Plan (agreed 2026-10-03)
 
 1. Lasers: done for now (hand-placed rigs, rotate rings, real-world angles, sky reach).
-2. Camera mapping (next): MoGe depth first, compared side by side with ours; if not good enough, an optional
-   "Regenerate from depth" step. Goals: fix edge slivers (two-layer depth with the hidden background filled
-   in), trustworthy shadows (shadowDepth is a guess today), better far-canyon depth.
+2. Camera mapping (in progress):
+   - `tools/depth_moge.py`: MoGe-2 depth (mapped onto the old depth range) and normals into a new scene folder
+     (`scenes/canyon-moge` = MoGe depth + our normals, `scenes/canyon-moge-n` = MoGe depth + MoGe normals;
+     view with `&scene=...`). MoGe-3 needs flex_gemm, which needs a compiler: MoGe-2 used.
+   - MoGe normals are clearly better (crisper strata, sharper terminators): now in `scenes/canyon` too
+     (old ones kept as `normal_marigold.png`).
+   - MoGe depth: crisper silhouettes, but more seams when the camera moves, so it needs the background layer.
+   - `tools/background_layer.py`: second layer behind every silhouette the renderer tears, band sized to the
+     camera's largest move, filled from the far side (opencv quick fill, or SDXL inpainting: --fill sdxl);
+     the display draws it behind the main layer (`?bg=off` to compare). Seams gone; fill quality next.
+   - Camera pitch is uncertain (5-23 deg depending on the measure); kept at 23 so tuned angles hold.
+   - Not done yet: switching the main scene to MoGe depth; "Regenerate from depth" (fallback, optional).
 3. Patterns. Structure: Scene -> Arrangement (when: which pattern on which setup in which song part) ->
    Pattern x Setup (how x what; patterns reusable across setups) -> Objects -> Elements -> Nodes -> Code.
    Foundation: a shared Houdini-style point/attribute model (every element has position, colour, brightness,
