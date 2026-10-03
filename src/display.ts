@@ -628,7 +628,10 @@ async function main() {
     return [e1, cross(d, e1)];
   };
 
-  type Grab = { i: number; handle: "point" | RingHandle; a?: number };
+  // Ring drags work like Maya's rotate tool: at the grab, the ring's direction on screen there (its tangent);
+  // after that only mouse movement along it counts, RING_PX pixels = one radian. Robust when a ring is seen
+  // edge-on, where its front and back overlap on screen.
+  type Grab = { i: number; handle: "point" | RingHandle; a?: number; sx?: number; sy?: number; tx?: number; ty?: number; v0?: number };
   let grab: Grab | null = null;
   let hover: Grab | null = null;
   const hitTest = (m: Module, x: number, y: number, within = 18): Grab | null => {
@@ -740,6 +743,19 @@ async function main() {
       const hit = hitTest(m, e.clientX, e.clientY);
       if (hit) {
         grab = hit;
+        if (hit.handle === "turn" || hit.handle === "tilt") {
+          const q = pts[hit.i];
+          const ring = ringPoints(q, hit.handle).pts;
+          const k = ring.findIndex((r) => r.a === hit.a);
+          const prev = ring[Math.max(0, k - 2)];
+          const next = ring[Math.min(ring.length - 1, k + 2)];
+          let tx = next.x - prev.x;
+          let ty = next.y - prev.y;
+          const l = Math.hypot(tx, ty);
+          if (l < 1e-3) (tx = 1), (ty = 0);
+          else (tx /= l), (ty /= l);
+          Object.assign(grab, { sx: e.clientX, sy: e.clientY, tx, ty, v0: hit.handle === "turn" ? q[2] : q[3] });
+        }
         canvas.setPointerCapture(e.pointerId);
         return;
       }
@@ -773,12 +789,11 @@ async function main() {
       const [u, v] = toImageUv(e);
       const q = pts[grab.i];
       if (grab.handle === "turn" || grab.handle === "tilt") {
-        // Follow the cursor around the ring: the angle it moved along the ring is the rotation.
-        const near = nearestOnRing(ringPoints(q, grab.handle).pts, e.clientX, e.clientY);
-        const step = wrapAngle(near.a - (grab.a ?? near.a)) * (e.shiftKey ? 0.25 : 1);
-        grab.a = near.a;
-        if (grab.handle === "turn") q[2] = (wrapAngle(q[2] * rad + step) * 180) / Math.PI;
-        else q[3] = clamp(q[3] + (step * 180) / Math.PI, -89, 89);
+        // Mouse movement along the ring's direction at the grab: RING_PX pixels = one radian.
+        const along = (e.clientX - grab.sx!) * grab.tx! + (e.clientY - grab.sy!) * grab.ty!;
+        const deg = ((along / RING_PX) * 180) / Math.PI * (e.shiftKey ? 0.25 : 1);
+        if (grab.handle === "turn") q[2] = (wrapAngle((grab.v0! + deg) * rad) * 180) / Math.PI;
+        else q[3] = clamp(grab.v0! + deg, -89, 89);
       } else (q[0] = u), (q[1] = v);
       return writePoints(placing, pts, false);
     }
@@ -1020,7 +1035,11 @@ async function main() {
       const v = 0.5 - q[1] / (q[2] * tanHalfFov) * 0.5;
       if (u < 0 || u > 1 || v < 0 || v > 1) return maxLen; // leaves the picture: draw it to full length
       const z = depthAt(u, v);
-      if (z < info.far * 0.98 && q[2] > z * 1.01 && q[2] < z * 3) {
+      // Behind a surface counts as inside rock only for so deep: thick for the cave walls around us, thin for
+      // far ridges (like the sun's shadows), so beams aimed up clear distant rims and reach the sky.
+      const f = Math.min(1, Math.max(0, (z - caveDepth) / (2 * caveDepth)));
+      const solid = 2 - 1.75 * f * f * (3 - 2 * f);
+      if (z < info.far * 0.98 && q[2] > z * 1.01 && q[2] < z * (1 + solid)) {
         // Refine between the last free step and this one.
         let lo = prev;
         let hi = s;
