@@ -1,0 +1,11 @@
+{
+  "name": "doppler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Landscape music visualizer: an AI landscape lit by music-driven lights and particles, on WebGPU.",
+  "scripts": {
+    "dev": "node --no-warnings tools/serve.mjs",
+    "prep": "tools/.venv/Scripts/python tools/scene_prep.py"
+  }
+}

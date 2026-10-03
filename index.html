@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Doppler</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+      #hud {
+        position: fixed; left: 12px; bottom: 12px; margin: 0; padding: 8px 10px;
+        font: 12px/1.5 ui-monospace, Consolas, monospace; color: #ddd;
+        background: rgba(0, 0, 0, 0.55); border-radius: 4px; pointer-events: none; white-space: pre;
+      }
+      .error { position: fixed; inset: 20px; color: #f88; font: 14px ui-monospace, monospace; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <canvas></canvas>
+    <pre id="hud"></pre>
+    <script type="module" src="src/display.ts"></script>
+  </body>
+</html>

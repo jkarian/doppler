@@ -1,0 +1,12 @@
+# Large or reproducible
+captures/
+tools/.venv/
+tools/models/
+__pycache__/
+node_modules/
+
+# Media: source images, generated scene maps, and music (not ours to publish)
+images/
+scenes/
+music/
+tracks/

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "doppler",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--no-warnings", "tools/serve.mjs", "5173"],
+      "port": 5173
+    }
+  ]
+}
