@@ -97,7 +97,7 @@ def fill_sdxl(img: np.ndarray, band: np.ndarray, unknown: np.ndarray, prompt: st
         x0 = int(np.clip(x - T // 2, 0, max(0, w - T)))
         tile = out[y0:y0 + T, x0:x0 + T]
         tmask = hide[y0:y0 + T, x0:x0 + T]
-        res = pipe(prompt=prompt, negative_prompt="people, text, blurry", image=Image.fromarray(tile), mask_image=Image.fromarray(tmask.astype(np.uint8) * 255),
+        res = pipe(prompt=prompt, negative_prompt="water, river, sky, clouds, haze, fog, grey, washed out, people, text, blurry", image=Image.fromarray(tile), mask_image=Image.fromarray(tmask.astype(np.uint8) * 255),
                    height=tile.shape[0], width=tile.shape[1], strength=0.99, num_inference_steps=30, guidance_scale=6.0, generator=gen).images[0]
         res = np.asarray(res.resize((tile.shape[1], tile.shape[0])))
         soft = cv2.GaussianBlur(tmask.astype(np.float32), (0, 0), 3)[..., None]
@@ -114,7 +114,7 @@ def main() -> None:
     ap.add_argument("--fill", choices=["opencv", "sdxl"], default="opencv")
     ap.add_argument("--sway", type=float, default=0.05, help="the display's sway amount (largest parallax shift, fraction of half-width)")
     ap.add_argument("--margin", type=float, default=1.5, help="band width safety factor (covers push-ins and the drop's camera moves)")
-    ap.add_argument("--prompt", default="sandstone canyon rock wall, natural texture, photo")
+    ap.add_argument("--prompt", default="red sandstone canyon cliff wall, layered rock strata, warm light, sharp natural texture, photo")
     args = ap.parse_args()
 
     info = json.loads((args.scene / "scene.json").read_text())
