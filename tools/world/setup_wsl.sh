@@ -5,6 +5,8 @@
 # Installs into /opt/world: a Python venv with PyTorch (CUDA 12.8), Stable Virtual Camera's code
 # (Stability AI, non-commercial licence) and gsplat (Apache).
 set -e
+# Models live in the user's model library C:\AI_Models (Hugging Face cache there too).
+export HF_HOME=/mnt/c/AI_Models/huggingface
 export PATH=/usr/local/cuda-12.8/bin:$PATH CUDA_HOME=/usr/local/cuda-12.8 TORCH_CUDA_ARCH_LIST=8.9
 
 mkdir -p /opt/world && cd /opt/world
@@ -17,7 +19,9 @@ pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu
 cd stable-virtual-camera
 # It pins numpy 1.24.4, which has no Python 3.12 build; any numpy 1.x works.
 sed -i 's/"numpy==1.24.4"/"numpy<2"/' pyproject.toml
-pip install -q -e .
+pip install -q -e . 'scipy<1.16'
+# Stability removed stabilityai/stable-diffusion-2-1-base from Hugging Face; its VAE is mirrored by sd2-community.
+sed -i 's#stabilityai/stable-diffusion-2-1-base#sd2-community/stable-diffusion-2-1-base#' seva/modules/autoencoder.py
 cd ..
 
 pip install -q --no-build-isolation gsplat
