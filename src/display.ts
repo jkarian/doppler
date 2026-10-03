@@ -33,6 +33,9 @@ interface SceneInfo {
   fovDeg: number;
   haze?: { airlight: number[]; beta: number };
   up?: number[]; // true vertical in scene space, from the flat ground (the photo's camera looks down a little)
+  // What's hidden behind near rock (tools/background_layer.py): drawn behind the main layer so camera moves
+  // uncover rock instead of dark seams.
+  background?: { depth: string; image: string; albedo: string; normal: string; mask?: string };
 }
 
 interface Look {
@@ -89,6 +92,15 @@ async function main() {
     fetch(sceneUrl + info.depth).then((r) => r.arrayBuffer()),
   ]);
   const depth = new Float32Array(depthBuf);
+  const bgInfo = params.get("bg") === "off" ? undefined : info.background;
+  const bgFiles = bgInfo
+    ? await Promise.all([
+        loadBitmap(bgInfo.image),
+        loadBitmap((params.get("delight") !== "off" && bgInfo.albedo) || bgInfo.image),
+        loadBitmap(bgInfo.normal),
+        fetch(sceneUrl + bgInfo.depth).then((r) => r.arrayBuffer()),
+      ])
+    : null;
 
   // --- Music ---------------------------------------------------------------------
   let music: Music | null = null;
@@ -174,6 +186,14 @@ async function main() {
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
   device.queue.writeTexture({ texture: depthTex }, depth, { bytesPerRow: W * 4 }, [W, H]);
+  // Background layer textures (same sizes and formats as the main layer's).
+  const bgTex = bgFiles
+    ? (() => {
+        const d = device.createTexture({ size: [W, H], format: "r32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+        device.queue.writeTexture({ texture: d }, new Float32Array(bgFiles[3]), { bytesPerRow: W * 4 }, [W, H]);
+        return { photo: imageTexture(bgFiles[0], "rgba8unorm-srgb"), albedo: imageTexture(bgFiles[1], "rgba8unorm-srgb"), normal: imageTexture(bgFiles[2], "rgba8unorm"), depth: d };
+      })()
+    : null;
 
   const format = navigator.gpu.getPreferredCanvasFormat();
   const ctx = canvas.getContext("webgpu")!;
@@ -255,6 +275,25 @@ async function main() {
       { binding: 10, resource: shadowA2.createView() },
     ],
   });
+  // The background layer draws with the same pipeline, its own depth, colour and normals.
+  const bgBindGroup = bgTex
+    ? device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuf } },
+          { binding: 1, resource: device.createSampler({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear", maxAnisotropy: 8 }) },
+          { binding: 2, resource: bgTex.albedo.createView() },
+          { binding: 3, resource: bgTex.normal.createView() },
+          { binding: 4, resource: bgTex.depth.createView() },
+          { binding: 5, resource: bgTex.photo.createView() },
+          { binding: 6, resource: shadowA.createView() },
+          { binding: 7, resource: raysTex.createView() },
+          { binding: 8, resource: { buffer: laserBuf } },
+          { binding: 9, resource: { buffer: nookBuf } },
+          { binding: 10, resource: shadowA2.createView() },
+        ],
+      })
+    : null;
   const raysBind = device.createBindGroup({
     layout: raysPipeline.getBindGroupLayout(0),
     entries: [
@@ -1013,8 +1052,8 @@ async function main() {
       ...sunScreen(look), look.sun ? skyBoost : 0, sunFloor,
       ...scanUniforms(graphOut.scan),
       ...skyUniforms(),
-      look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, 0,
-      ...UP, 0,
+      look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, graphOut.sun?.caveDepth ?? 15,
+      ...UP, bgBindGroup ? 1 : 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
@@ -1050,6 +1089,11 @@ async function main() {
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
     pass.draw(grid[0] * grid[1] * 6);
+    // Behind it, the background layer (instance 1): only shows where the main layer moved off it.
+    if (bgBindGroup) {
+      pass.setBindGroup(0, bgBindGroup);
+      pass.draw(grid[0] * grid[1] * 6, 1, 0, 1);
+    }
     pass.end();
     device.queue.submit([enc.finish()]);
   };

@@ -223,12 +223,13 @@
    "params": {
     "azimuth": 14.65,
     "enabled": 1,
-    "maxArc": 29,
+    "maxArc": 4.5,
     "floorLight": 0,
     "gain": 10,
     "bounce": 0.5,
     "shadowDepth": 0.3,
-    "shadowSoftness": 0.1
+    "shadowSoftness": 0.1,
+    "caveDepth": 15
    }
   },
   {
@@ -754,7 +755,7 @@
    "type": "SunTint",
    "name": "Sun colour by height",
    "params": {
-    "warmth": 1
+    "warmth": 0.3
    },
    "pos": [
     620,

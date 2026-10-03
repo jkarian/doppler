@@ -40,8 +40,8 @@ struct Uniforms {
   scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), -
   skyA: vec4f,         // sky gradient: mix with the photo, brightness, clouds, glow around the sun
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
-  sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth (fraction of distance), -
-  up: vec4f,           // true vertical in scene space (the photo's camera looks down a little), -
+  sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth, cave rock solid depth (fractions of distance)
+  up: vec4f,           // true vertical in scene space (the photo's camera looks down a little), background layer present (1/0)
 };
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
@@ -405,7 +405,7 @@ struct VsOut {
 
 // One vertex per mesh corner, generated from the index: no vertex buffers.
 @vertex
-fn vs(@builtin(vertex_index) i: u32) -> VsOut {
+fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsOut {
   let cols = u32(u.grid.x);
   let quad = i / 6u;
   let corner = array(vec2u(0, 0), vec2u(1, 0), vec2u(0, 1), vec2u(0, 1), vec2u(1, 0), vec2u(1, 1))[i % 6u];
@@ -422,7 +422,8 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
   let d11 = depthAt(vec2f(g0 + vec2u(1, 1)) / u.grid);
   let zmin = min(min(d00, d10), min(d01, d11));
   let zmax = max(max(d00, d10), max(d01, d11));
-  let z = select(depthAt(uv), zmax, zmax > zmin * 1.08);
+  let silhouette = zmax > zmin * 1.08;
+  let z = select(depthAt(uv), zmax, silhouette);
 
   let pc = viewPos(uv, z) - u.camPos;
   let tanXY = vec2f(u.tanHalfFov * u.aspect, u.tanHalfFov);
@@ -431,6 +432,9 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
   let q = pc.xy / (pc.z * tanXY) + u.camPos.xy / (u.pivotZ * tanXY);
   var out: VsOut;
   out.pos = vec4f((q - u.center) * u.viewScale, clamp(pc.z / (u.far * 2.0), 0.0, 1.0), 1.0);
+  // With a background layer, the main layer drops the squares that span a silhouette (stretched, they show
+  // as dark seams when the camera moves): the background layer behind fills the gap with hidden rock.
+  if (layer == 0u && silhouette && u.up.w > 0.5) { out.pos = vec4f(0.0, 0.0, -1.0, 1.0); }
   out.uv = uv;
   return out;
 }
@@ -579,7 +583,7 @@ fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool, so
     // light, but far canyon rays passing well behind the cave mouth aren't blocked by it.
     // Far terrain is thinner: beyond the cave, a ray passing a little behind a distant ridge is over it, not
     // inside it, so plateau tops and upper walls catch a high sun.
-    let thickness = select(q.z * 0.35, d * mix(2.0, u.sunB.z, smoothstep(u.caveDepth, u.caveDepth * 3.0, d)), enclosed);
+    let thickness = select(q.z * 0.35, d * mix(u.sunB.w, u.sunB.z, smoothstep(u.caveDepth, u.caveDepth * 3.0, d)), enclosed);
     if (gap > bias && gap < thickness) {
       // How abruptly a grazing ray goes from lit to blocked: the penumbra (soft = 1 is the old look).
       lit = min(lit, 1.0 - smoothstep(bias, bias * (1.0 + 0.5 * soft + 0.02), gap));
