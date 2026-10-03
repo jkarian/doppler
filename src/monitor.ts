@@ -189,6 +189,8 @@ export function createMonitor(o: MonitorOptions) {
     { type: "Sun", param: "azimuth", label: "sun direction", min: -60, max: 60, step: 0.5 },
     { type: "Sun", param: "bounce", label: "bounce", min: 0, max: 2, step: 0.05 },
     { type: "Sun", param: "floorLight", label: "floor light", min: 0, max: 1, step: 0.05 },
+    { type: "Sun", param: "shadowSoftness", label: "shadow softness", min: 0, max: 1, step: 0.05 },
+    { type: "Sun", param: "shadowDepth", label: "shadow depth", min: 0.05, max: 2, step: 0.05 },
     { type: "Tone", param: "cap", label: "brightness cap", min: 0.2, max: 10, step: 0.05 },
     { type: "NookLights", param: "intensity", label: "nook lights", min: 0, max: 20, step: 0.05 },
     { type: "Sky", param: "brightness", label: "sky", min: 0, max: 20, step: 0.1 },

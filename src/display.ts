@@ -919,7 +919,7 @@ async function main() {
       ...sunScreen(look), look.sun ? skyBoost : 0, sunFloor,
       ...scanUniforms(graphOut.scan),
       ...skyUniforms(),
-      look.sun ? graphOut.sun?.bounce ?? 0 : 0, 0, 0, 0,
+      look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);

@@ -24,6 +24,8 @@ const HELP: Record<string, string> = {
   "Sun.gain": "Overall sun brightness: multiplies whatever drives it. Raise it to make the sun stand out from the other lights (the brightness cap can limit how far it shows).",
   "Sun.floorLight": "How much sun falls on the floor: flat ground lower than floorBelow (canyon floor, river) and the cave floor around us. 0 = none; 1 = lit like everything else. Plateau tops and high ledges always get sun.",
   "Sun.bounce": "Warm light bounced off sunlit rock and the bright sky into the faces turned away from the sun, which otherwise stay dark when we look toward the sun. Grows as the sun climbs. 0 = none.",
+  "Sun.shadowSoftness": "Edge of the sun's cast shadows: 0 = hard and crisp like real sunlight, 1 = soft.",
+  "Sun.shadowDepth": "How solid far ridges are when casting shadows (how deep behind their face the rock counts as solid, as a fraction of their distance). Higher = cliffs throw longer, fuller shadows across the canyon; too high and light can't reach anything behind a ridge.",
   "Sun.floorBelow": "Height in feet relative to the camera: flat ground below this is floor (the river is about -2700, plateau tops about +1300).",
   "Sun.maxArc": "Highest the sun may climb, in degrees. It eases into this ceiling instead of stopping dead.",
   "Sun.azimuth": "Where the sun sits left-right, in degrees (0 = straight ahead). Further to the side, its light rakes across the canyon walls instead of coming from behind them.",

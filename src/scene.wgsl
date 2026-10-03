@@ -40,7 +40,7 @@ struct Uniforms {
   scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), -
   skyA: vec4f,         // sky gradient: mix with the photo, brightness, clouds, glow around the sun
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
-  sunB: vec4f,         // bounce light strength, -, -, -
+  sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth (fraction of distance), -
 };
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
@@ -464,12 +464,12 @@ fn fs_shadow(@builtin(position) frag: vec4f) -> ShadowOut {
   if (u.shadows < 0.5 || z >= u.far * u.skyCut) { return out; }
   let p = viewPos(uv, z);
   let hit = lightAt(p);
-  if (hit.amount > 0.0) { out.a.x = shadowAt(p, hit.l, hit.dist, frag.xy, u.sun > 0.5); }  // outside the beam: nothing to shadow
+  if (hit.amount > 0.0) { out.a.x = shadowAt(p, hit.l, hit.dist, frag.xy, u.sun > 0.5, select(1.0, u.sunB.y, u.sun > 0.5)); }  // outside the beam: nothing to shadow
   for (var i = 0u; i < min(nooks.count, NOOK_SHADOWS); i++) {
     let toL = nooks.l[i].pos - p;
     let d = length(toL);
     if (d < nooks.l[i].radius && d > 1e-4) {
-      let sh = shadowAt(p, toL / d, d, frag.xy, false);
+      let sh = shadowAt(p, toL / d, d, frag.xy, false, 1.0);
       if (i < 3u) { out.a[i + 1u] = sh; } else { out.b[i - 3u] = sh; }
     }
   }
@@ -520,20 +520,31 @@ fn fs_blur(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let step = select(vec2i(0, 1), vec2i(1, 0), HORIZONTAL);
   var sum = vec4f(0.0);
   var wsum = 0.0;
+  // The sun's channel (r) blurs only as much as its softness asks: a hard sun keeps crisp edges.
+  var sunSum = 0.0;
+  var sunW = 0.0;
+  let sunSigma2 = 2.0 * mix(0.3, 1.5, select(1.0, u.sunB.y, u.sun > 0.5)) * mix(0.3, 1.5, select(1.0, u.sunB.y, u.sun > 0.5));
   for (var k = -R; k <= R; k++) {
     let t = clamp(texel + step * k, vec2i(0), vec2i(size) - 1);
     let zk = depthNearest((vec2f(t) + 0.5) / size);
     // Gaussian in distance, and nearly zero across a depth jump of more than a few percent.
     let dz = (zk - z0) / (0.03 * z0);
-    let w = exp(-f32(k * k) / 4.5) * exp(-dz * dz);
-    sum += w * textureLoad(shadowTex, t, 0);
+    let edge = exp(-dz * dz);
+    let v = textureLoad(shadowTex, t, 0);
+    let w = exp(-f32(k * k) / 4.5) * edge;
+    sum += w * v;
     wsum += w;
+    let ws = exp(-f32(k * k) / sunSigma2) * edge;
+    sunSum += ws * v.r;
+    sunW += ws;
   }
-  return sum / wsum;
+  var out = sum / wsum;
+  out.r = sunSum / sunW;
+  return out;
 }
 
 // March from the surface toward the light and look for depth in the way.
-fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool) -> f32 {
+fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool, soft: f32) -> f32 {
   const STEPS = 64;  // more steps, less jitter to blur away
   // Fixed per-pixel jitter (interleaved gradient noise) breaks step aliasing into fine grain. No time term: same frame every run.
   let jitter = fract(52.9829189 * fract(dot(frag, vec2f(0.06711056, 0.00583715))));
@@ -567,9 +578,10 @@ fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool) ->
     // light, but far canyon rays passing well behind the cave mouth aren't blocked by it.
     // Far terrain is thinner: beyond the cave, a ray passing a little behind a distant ridge is over it, not
     // inside it, so plateau tops and upper walls catch a high sun.
-    let thickness = select(q.z * 0.35, d * mix(2.0, 0.15, smoothstep(u.caveDepth, u.caveDepth * 3.0, d)), enclosed);
+    let thickness = select(q.z * 0.35, d * mix(2.0, u.sunB.z, smoothstep(u.caveDepth, u.caveDepth * 3.0, d)), enclosed);
     if (gap > bias && gap < thickness) {
-      lit = min(lit, 1.0 - smoothstep(bias, bias * 1.5, gap));
+      // How abruptly a grazing ray goes from lit to blocked: the penumbra (soft = 1 is the old look).
+      lit = min(lit, 1.0 - smoothstep(bias, bias * (1.0 + 0.5 * soft + 0.02), gap));
       if (enclosed && lit <= 0.0) { return 0.0; }
     }
   }

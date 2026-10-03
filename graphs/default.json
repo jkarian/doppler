@@ -223,10 +223,12 @@
    "params": {
     "azimuth": 14.65,
     "enabled": 1,
-    "maxArc": 31,
+    "maxArc": 35.5,
     "floorLight": 0,
     "gain": 3,
-    "bounce": 0.5
+    "bounce": 0.5,
+    "shadowDepth": 0.3,
+    "shadowSoftness": 0.1
    }
   },
   {

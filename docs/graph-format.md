@@ -97,7 +97,7 @@ Output nodes write the renderer's parameters. Anything a graph doesn't set keeps
 
 | Node | Inputs |
 |---|---|
-| Sun | `gain` (brightness multiplier), `floorLight` (0..1: sun on the floor), `floorBelow` (feet: flat ground lower than this is floor), `bounce` (light into faces turned from the sun), `maxArc` soft ceiling (degrees; eases in over the last 6), `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
+| Sun | `gain` (brightness multiplier), `floorLight` (0..1: sun on the floor), `floorBelow` (feet: flat ground lower than this is floor), `bounce` (light into faces turned from the sun), `shadowSoftness` (0 hard..1 soft edges), `shadowDepth` (how solid far ridges are when casting shadows), `maxArc` soft ceiling (degrees; eases in over the last 6), `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
 | Camera | `swayX`, `swayY`, `pushZ` in units of the display's sway amount (pushZ is clamped to ≥ 0) |
 | Tone | `baseDim`, `baked`, `cap` |
 | Sky | `mix` (0 photo sky, 1 gradient), `brightness`, `clouds`, `glow`, `span` (degrees): a dusk-to-day gradient that follows the sun's height |
