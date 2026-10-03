@@ -56,7 +56,7 @@ export interface SkyLaserOut {
   color: number[];
   intensity: number;
   hit: number;
-  rigs?: number[][]; // ground rigs placed by hand: [u, v, aim u, aim v, cone degrees]; empty = seeded random spots
+  rigs?: number[][]; // ground rigs placed by hand: [u, v, turn, tilt, cone] (degrees); empty = seeded random spots
 }
 
 export interface LaserOut {
@@ -631,8 +631,9 @@ const defs: NodeDef[] = [
       "time floor(trigger) changes; sheet 1 makes them vertical curtains. from 1 (ground): count laser rigs sit at fixed " +
       "random spots on the rock and each fires a beam in a random direction (elevation elevMin-elevMax), re-aimed each " +
       "trigger step. The same track always gives the same choices. Shares the 4-fixture limit with Laser. " +
-      "rigs (ground): rigs placed by hand (N on the display, Tab to laser rigs), u,v,aim u,aim v,cone; ... Each re-aims at random " +
-      "within its cone (degrees) around its aim point every trigger step. Empty: rigs at seeded random spots.",
+      "rigs (ground): rigs placed by hand (N on the display, Tab to laser rigs), u,v,turn,tilt,cone; ... in degrees (turn 0 = " +
+      "into the scene, positive right; tilt up from level). Each re-aims at random within its cone every trigger step. " +
+      "Empty: rigs at seeded random spots.",
     inputs: [
       { name: "from", default: 0, kind: "const", min: 0, max: 1, step: 1, doc: "0 sky, 1 ground rigs" },
       { name: "elevMin", default: 15, min: -30, max: 89, step: 1, doc: "ground: lowest aim, degrees up" },
@@ -668,7 +669,7 @@ const defs: NodeDef[] = [
         .split(";")
         .map((q) => q.split(",").map(Number))
         .filter((q) => q.length >= 2 && q.every(Number.isFinite))
-        .map(([u, v, tu = u, tv = v - 0.25, cone = 30]) => [u, v, tu, tv, cone]);
+        .map(([u, v, turn = 0, tilt = 50, cone = 30]) => [u, v, turn, tilt, cone]);
       (ctx.out.skyLasers ??= []).push({
         rigs,
         from: num(i.from) > 0.5 ? 1 : 0, elevMin: num(i.elevMin), elevMax: Math.max(num(i.elevMin), num(i.elevMax)),

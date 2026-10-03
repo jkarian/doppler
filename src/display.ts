@@ -515,8 +515,8 @@ async function main() {
   // --- Input ------------------------------------------------------------------
   // Placement (N): put each module's fixtures on the rock by hand. Tab switches module.
   //   Nook lights: drag a ring to move it, scroll over it for its area, shift+scroll for its brightness.
-  //   Laser rigs: drag the ring to move the rig, drag its diamond to aim it, scroll over the ring for the
-  //   search cone it re-aims within.
+  //   Laser rigs: drag the ring to move the rig; drag the aim handle next to it to turn (left/right) and
+  //   tilt (up/down) it, shift for fine; scroll over the ring for the search cone it re-aims within.
   //   Both: click empty rock to add, shift- or right-click to remove the nearest, Delete clears them all.
   // Edits go into the graph's nodes (and reach the editor); save with the monitor (G). Everything in the
   // module shows while placing.
@@ -530,17 +530,17 @@ async function main() {
       ? runtime.graph.nodes.find((n) => n.type === "NookLights")
       : runtime.graph.nodes.find((n) => n.type === "SkyLaser" && Number(n.params?.from ?? 0) >= 0.5);
   const PARAM: Record<Module, string> = { nooks: "positions", rigs: "rigs" };
-  // Points: nook lights [u, v, area, brightness]; rigs [u, v, aim u, aim v, cone degrees].
+  // Points: nook lights [u, v, area, brightness]; rigs [u, v, turn, tilt, cone] (degrees).
   const readPoints = (m: Module): number[][] =>
     String(moduleNode(m)?.params?.[PARAM[m]] ?? "")
       .split(";")
       .map((q) => q.split(",").map(Number))
       .filter((q) => q.length >= 2 && q.every(Number.isFinite))
-      .map((q) => (m === "nooks" ? [q[0], q[1], q[2] ?? 1, q[3] ?? 1] : [q[0], q[1], q[2] ?? q[0], q[3] ?? q[1] - 0.25, q[4] ?? 30]));
+      .map((q) => (m === "nooks" ? [q[0], q[1], q[2] ?? 1, q[3] ?? 1] : [q[0], q[1], q[2] ?? 0, q[3] ?? 50, q[4] ?? 30]));
   const fmtPoint = (m: Module, q: number[]) =>
     m === "nooks"
       ? [q[0].toFixed(4), q[1].toFixed(4), ...(q[2] !== 1 || q[3] !== 1 ? [q[2].toFixed(2), q[3].toFixed(2)] : [])].join(",")
-      : [...q.slice(0, 4).map((x) => x.toFixed(4)), q[4].toFixed(1)].join(",");
+      : [q[0].toFixed(4), q[1].toFixed(4), ...q.slice(2, 5).map((x) => x.toFixed(1))].join(",");
   // final = false while dragging or scrolling: update the picture only; tell the editor and monitor after.
   const writePoints = (m: Module, pts: number[][], final = true) => {
     const node = moduleNode(m);
@@ -559,13 +559,31 @@ async function main() {
     ];
   };
   const project3 = (p: Vec3): [number, number] => [(p[0] / (p[2] * tanHalfFov * aspect)) * 0.5 + 0.5, 0.5 - (p[1] / (p[2] * tanHalfFov)) * 0.5];
-  // A rig stands just in front of the rock at its spot; it aims at the scene point under its aim handle.
+  // A rig stands just in front of the rock at its spot, aimed by turn (0 = into the scene, + right) and tilt (up).
   const rigOrigin = (u: number, v: number) => viewPos(u, v, depthAt(u, v) * 0.985);
   const rigAim = (q: number[]) => {
     const o = rigOrigin(q[0], q[1]);
-    const t = viewPos(q[2], q[3]);
-    const d: Vec3 = [t[0] - o[0], t[1] - o[1], t[2] - o[2]];
-    return { o, d: normalize(d), len: Math.hypot(d[0], d[1], d[2]) };
+    const az = q[2] * rad;
+    const el = q[3] * rad;
+    const d: Vec3 = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    // How far out to draw the cone: a good way out, but not past the rock the beam would hit.
+    return { o, d, len: Math.min(beamLength(o, d, info.far * 1.5), o[2] * 0.5) };
+  };
+  // The aim handle sits a fixed distance from the rig on screen, in the direction the beam goes.
+  const AIM_HANDLE_PX = 70;
+  const aimHandle = (q: number[]) => {
+    const { o, d } = rigAim(q);
+    const [x, y] = uvToScreen(q[0], q[1]);
+    const step = Math.max(o[2] * 0.05, 1e-3);
+    const tip: Vec3 = [o[0] + d[0] * step, o[1] + d[1] * step, o[2] + d[2] * step];
+    let dx = 0;
+    let dy = -1;
+    if (tip[2] > 0.01) {
+      const [tx, ty] = uvToScreen(...project3(tip));
+      const l = Math.hypot(tx - x, ty - y);
+      if (l > 1e-3) (dx = (tx - x) / l), (dy = (ty - y) / l);
+    }
+    return [x + dx * AIM_HANDLE_PX, y + dy * AIM_HANDLE_PX];
   };
   const coneBasis = (d: Vec3): [Vec3, Vec3] => {
     let e1 = normalize(cross([0, 1, 0], d));
@@ -573,17 +591,16 @@ async function main() {
     return [e1, cross(d, e1)];
   };
 
-  type Grab = { i: number; handle: "point" | "aim" };
+  type Grab = { i: number; handle: "point" | "aim"; x?: number; y?: number };
   let grab: Grab | null = null;
   let hover: Grab | null = null;
   const hitTest = (m: Module, x: number, y: number, within = 18): Grab | null => {
     let best: Grab | null = null;
     let bd = within;
     readPoints(m).forEach((q, i) => {
-      const handles: [Grab["handle"], number, number][] = [["point", q[0], q[1]]];
-      if (m === "rigs") handles.push(["aim", q[2], q[3]]);
-      for (const [handle, u, v] of handles) {
-        const [sx, sy] = uvToScreen(u, v);
+      const handles: [Grab["handle"], number, number][] = [["point", ...(uvToScreen(q[0], q[1]) as [number, number])]];
+      if (m === "rigs") handles.push(["aim", ...(aimHandle(q) as [number, number])]);
+      for (const [handle, sx, sy] of handles) {
         const d = Math.hypot(sx - x, sy - y);
         if (d < bd) (bd = d), (best = { i, handle });
       }
@@ -626,7 +643,7 @@ async function main() {
         const half = (q[4] / 2) * rad;
         const color = isOn(i, "point") || isOn(i, "aim") ? "#fff" : "#ff7a6b";
         const [x, y] = uvToScreen(q[0], q[1]);
-        const [ax, ay] = uvToScreen(q[2], q[3]);
+        const [ax, ay] = aimHandle(q);
         // The search cone: its rim at the aim distance, and lines out to it.
         const rim: number[][] = [];
         for (let k = 0; k <= 32; k++) {
@@ -642,15 +659,17 @@ async function main() {
           }
         }
         svg += `<line x1="${x}" y1="${y}" x2="${ax}" y2="${ay}" stroke="${color}" stroke-width="1.5" opacity="0.8"/>`;
-        svg += `<rect x="${ax - 6}" y="${ay - 6}" width="12" height="12" transform="rotate(45 ${ax} ${ay})" fill="rgba(0,0,0,0.4)" stroke="${color}" stroke-width="2"/>`;
+        // Aim handle: a circle with turn/tilt arrows.
+        svg += `<circle cx="${ax}" cy="${ay}" r="11" fill="rgba(0,0,0,0.45)" stroke="${color}" stroke-width="2"/>`;
+        svg += `<path d="M${ax - 7} ${ay} h14 M${ax - 7} ${ay} l3 -3 M${ax - 7} ${ay} l3 3 M${ax + 7} ${ay} l-3 -3 M${ax + 7} ${ay} l-3 3 M${ax} ${ay - 7} v14 M${ax} ${ay - 7} l-3 3 M${ax} ${ay - 7} l3 3 M${ax} ${ay + 7} l-3 -3 M${ax} ${ay + 7} l3 -3" stroke="${color}" stroke-width="1.5" fill="none"/>`;
         svg += ring(x, y, i + 1, color);
-        svg += label(x + 13, y + 4, `cone ${Math.round(q[4])}°`, color);
+        svg += label(x + 13, y + 18, `turn ${Math.round(q[2])}° · tilt ${Math.round(q[3])}° · cone ${Math.round(q[4])}°`, color);
       });
     }
     const how =
       m === "nooks"
         ? "drag a ring to move · scroll: area · shift+scroll: brightness"
-        : "drag the ring to move · drag the diamond to aim · scroll over the ring: search cone";
+        : "drag the ring to move · drag the aim handle: left/right turns, up/down tilts (shift: fine) · scroll over the ring: search cone";
     svg +=
       `<text x="50%" y="28" text-anchor="middle" fill="#fff" font-size="14" paint-order="stroke" stroke="#000" stroke-width="4">` +
       `PLACING ${MODULE_NAME[m]} (Tab: switch) · ${how} · click: add · shift/right-click: remove · Delete: clear · N: done · save in G</text>`;
@@ -663,7 +682,7 @@ async function main() {
     if (!e.shiftKey && e.button === 0) {
       const hit = hitTest(m, e.clientX, e.clientY);
       if (hit) {
-        grab = hit;
+        grab = { ...hit, x: e.clientX, y: e.clientY };
         canvas.setPointerCapture(e.pointerId);
         return;
       }
@@ -672,7 +691,7 @@ async function main() {
     if (e.shiftKey || e.button === 2) {
       const hit = hitTest(m, e.clientX, e.clientY, 60);
       if (hit) pts.splice(hit.i, 1);
-    } else pts.push(m === "nooks" ? [u, v, 1, 1] : [u, v, u, Math.max(0, v - 0.25), 30]);
+    } else pts.push(m === "nooks" ? [u, v, 1, 1] : [u, v, 0, 50, 30]);
     writePoints(m, pts);
   };
 
@@ -696,8 +715,14 @@ async function main() {
       const pts = readPoints(placing);
       const [u, v] = toImageUv(e);
       const q = pts[grab.i];
-      if (grab.handle === "aim") (q[2] = u), (q[3] = v);
-      else (q[0] = u), (q[1] = v);
+      if (grab.handle === "aim") {
+        // Turntable: left/right turns, up/down tilts. Relative, so it never jumps.
+        const k = e.shiftKey ? 0.1 : 0.4;
+        q[2] = ((((q[2] + (e.clientX - grab.x!) * k + 180) % 360) + 360) % 360) - 180;
+        q[3] = clamp(q[3] - (e.clientY - grab.y!) * k, -89, 89);
+        grab.x = e.clientX;
+        grab.y = e.clientY;
+      } else (q[0] = u), (q[1] = v);
       return writePoints(placing, pts, false);
     }
     if (dragging === "target") aimAt(e);
