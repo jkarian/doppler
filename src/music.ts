@@ -133,26 +133,25 @@ export class Music {
 
 /**
  * Elastic response to pushes: how far the sun is lifted above its rest level (0 = rest, 1 = overhead).
- * Fast rise, a hold, then a damped spring back that dips a little below rest before settling.
+ * Each push holds a target up for HOLD seconds; the sun follows it like a mass on a damped spring.
+ * It starts from rest with zero speed (inertia), takes about a second and a half to climb, overshoots
+ * a little, and on the way back dips slightly below rest before settling. The spring is linear, so
+ * overlapping pushes simply add.
  */
 export function lift(pushes: Push[], t: number): number {
-  const ATTACK = 0.25;
-  const HOLD = 1.0;
-  let best: number | null = null;
+  const HOLD = 2.0; // seconds the push holds the target up
+  const OMEGA = 2.2; // natural frequency (rad/s): lower = heavier, slower
+  const ZETA = 0.6; // damping: 1 = no overshoot, lower = more bounce
+  const wd = OMEGA * Math.sqrt(1 - ZETA * ZETA);
+  const step = (x: number) =>
+    x <= 0 ? 0 : 1 - Math.exp(-ZETA * OMEGA * x) * (Math.cos(wd * x) + (ZETA / Math.sqrt(1 - ZETA * ZETA)) * Math.sin(wd * x));
+  let sum = 0;
   for (const p of pushes) {
     const x = t - p.t;
-    if (x < 0 || x > ATTACK + HOLD + 5) continue;
-    let k: number;
-    if (x < ATTACK) k = 1 - (1 - x / ATTACK) ** 3;
-    else if (x < ATTACK + HOLD) k = 1;
-    else {
-      const y = x - ATTACK - HOLD;
-      k = Math.exp(-y / 0.8) * Math.cos(y * 2.3);
-    }
-    const v = k * p.strength;
-    if (best === null || v > best) best = v;
+    if (x < 0 || x > HOLD + 8) continue;
+    sum += p.strength * (step(x) - step(x - HOLD));
   }
-  return best ?? 0;
+  return Math.min(sum, 1.5);
 }
 
 function sampleCurve(c: { rate: number; values: number[] }, t: number): number {
