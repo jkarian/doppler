@@ -17,6 +17,14 @@ arrows pan · `=` `-` zoom · `M` camera sway (parallax) · `;` `'` sway amount 
 `T` sun / spotlight (sun: drag places the sun where the pointer is) · `5` `6` sun shafts · `7` `8` how much of the photo's own lighting shows ·
 `9` `0` beam edge softness · `B` GPU benchmark · `[` `]` base dim · `,` `.` brightness cap · `S` shadows · `V` debug views · `P` save 1080p frame to `captures/` (shift+P: 4K) · `C` copy values · `R` reset · `F` full screen · `H` hide values.
 
+## Node graph
+
+The sun, camera and tone are driven by a node graph, `graphs/default.json` (pick another with `?graph=<name>`).
+Press `E` on the display (or open http://localhost:5173/editor.html) to edit it live: edits apply to the
+display instantly while the music plays, and each node shows its current values. Save writes `graphs/<name>.json`.
+Right-click adds a node; drag from an output to an input to wire; drag a value's name to scrub it.
+File format and node reference: [docs/graph-format.md](docs/graph-format.md).
+
 ## Music
 
 ```bash

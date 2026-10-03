@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Doppler Graph</title>
+    <style>
+      :root {
+        --bg: #14161a; --grid: #1c1f24; --panel: #22262d; --panel-2: #2a2f37; --line: #3a404a;
+        --text: #d8dce3; --dim: #8a919c; --accent: #e8a35a; --signal: #6fb3e0; --const: #b08ad8;
+        --err: #e06c6c; --ok: #7cc48a;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 12px/1.4 ui-sans-serif, system-ui, sans-serif; overflow: hidden; }
+      #bar { position: fixed; inset: 0 0 auto 0; height: 38px; display: flex; gap: 10px; align-items: center; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); z-index: 10; }
+      #bar input, #bar button, #bar select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; font: inherit; }
+      #bar button:hover { border-color: var(--accent); cursor: pointer; }
+      #status { margin-left: auto; color: var(--dim); white-space: nowrap; }
+      #status .live { color: var(--ok); }
+      #view { position: fixed; inset: 38px 0 0 0; overflow: hidden; cursor: grab;
+        background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
+      #view.panning { cursor: grabbing; }
+      #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+      #wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+      #wires path { fill: none; stroke: var(--signal); stroke-width: 2; opacity: 0.8; pointer-events: stroke; cursor: pointer; }
+      #wires path.selected { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+      #wires path.pending { stroke-dasharray: 5 4; pointer-events: none; }
+      .node { position: absolute; min-width: 190px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px #0006; }
+      .node.selected { border-color: var(--accent); }
+      .node.error { border-color: var(--err); }
+      .node.Output .head { background: #3b2f22; }
+      .node.Music .head { background: #223040; }
+      .node.Scene .head { background: #263626; }
+      .node.Value .head { background: #33283d; }
+      .head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel-2); border-radius: 6px 6px 0 0; cursor: move; user-select: none; }
+      .head .title { font-weight: 600; flex: 1; white-space: nowrap; }
+      .head .type { color: var(--dim); font-size: 11px; }
+      .head .lock { cursor: pointer; opacity: 0.5; }
+      .head .lock.on { opacity: 1; }
+      .row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; position: relative; min-height: 22px; }
+      .row .name { color: var(--dim); min-width: 64px; cursor: ew-resize; user-select: none; }
+      .row.const .name { color: #c9b3e6; cursor: ew-resize; }
+      .row input[type=number], .row input[type=text] { width: 100%; min-width: 60px; background: #191c21; color: var(--text); border: 1px solid #333944; border-radius: 3px; padding: 1px 4px; font: 11px ui-monospace, Consolas, monospace; }
+      .row input.expr { min-width: 220px; }
+      .row .live { font: 11px ui-monospace, Consolas, monospace; color: var(--signal); white-space: nowrap; }
+      .row.out { justify-content: flex-end; }
+      .port { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: var(--panel); border: 2px solid var(--signal); top: 50%; transform: translateY(-50%); cursor: crosshair; }
+      .port.in { left: -6px; }
+      .port.out { right: -6px; }
+      .port.wired { background: var(--signal); }
+      .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); flex: none; }
+      .err { color: var(--err); padding: 2px 8px 6px; font-size: 11px; max-width: 260px; }
+      #menu { position: fixed; display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 0; z-index: 20; max-height: 70vh; overflow: auto; min-width: 200px; box-shadow: 0 6px 20px #0008; }
+      #menu .cat { color: var(--dim); padding: 6px 12px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+      #menu .item { padding: 4px 12px; cursor: pointer; }
+      #menu .item:hover { background: var(--panel-2); color: var(--accent); }
+      #help { position: fixed; right: 12px; bottom: 10px; color: var(--dim); font-size: 11px; text-align: right; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <strong>Doppler graph</strong>
+      <input id="name" value="default" size="14" title="graph name: saved to graphs/NAME.json" />
+      <button id="save" title="write graphs/NAME.json">Save</button>
+      <button id="load" title="reload graphs/NAME.json from disk">Load</button>
+      <button id="fit">Fit</button>
+      <span id="status">waiting for the display…</span>
+    </div>
+    <div id="view"><div id="world"><svg id="wires"></svg></div></div>
+    <div id="menu"></div>
+    <div id="help">right-click: add node · drag output → input: wire · click wire / node + Delete: remove · drag a value's name: scrub · double-click title: rename · wheel: zoom · drag background: pan</div>
+    <script type="module" src="src/editor.ts"></script>
+  </body>
+</html>

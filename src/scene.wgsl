@@ -33,6 +33,7 @@ struct Uniforms {
   caveDepth: f32,      // sun shadows: rock nearer than this is the cave around the camera
   flare: f32,          // lens flare strength (already scaled by how much of the sun is visible)
   sunScreen: vec2f,    // the sun's position on screen, ndc
+  skyBoost: f32,       // extra sky glow, pumping with the kick
 };
 
 // Lens flare, in screen space: a glow and starburst at the sun, and coloured ghosts along the line
@@ -314,7 +315,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   // so the photo's own daylight, haze and sun shafts don't show. `baked` mixes the photo back in.
   // The sky itself keeps the photo.
   let ambient = mix(vec3f(0.18, 0.14, 0.12), vec3f(0.42, 0.50, 0.65), 0.5 + 0.5 * n.y);
-  let base = select(mix(albedo * ambient, photo, u.baked), photo, sky);
+  let base = select(mix(albedo * ambient, photo, u.baked), photo * (1.0 + u.skyBoost), sky);
   var color = base * u.baseDim + albedo * light;
 
   // Sun shafts: only in the open air beyond the cave mouth, so they never veil the near walls.

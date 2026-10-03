@@ -12,7 +12,9 @@
 //   space play/pause   J L seek 5 s   { } audio/video offset (10 ms; alt: 1 ms)   A auto light on/off
 //   S shadows   V cycle debug view   H show values   P save 1080p frame (shift: 4K)   C copy values   R reset   F full screen
 
-import { Music, SunGate, SunMotion, seeded, type Analysis, type Spurt } from "./music.ts";
+import { Music, seeded, type Analysis } from "./music.ts";
+import { GraphRuntime, type Graph } from "./graph/runtime.ts";
+import type { RenderOut } from "./graph/nodes.ts";
 
 type Vec3 = [number, number, number];
 
@@ -56,6 +58,7 @@ const params = new URLSearchParams(location.search);
 const sceneName = params.get("scene") ?? "canyon";
 const sceneUrl = `scenes/${sceneName}/`;
 const trackName = params.get("track");
+const graphName = params.get("graph") ?? "default";
 
 const canvas = document.querySelector("canvas")!;
 const hud = document.querySelector<HTMLElement>("#hud")!;
@@ -306,31 +309,13 @@ async function main() {
   const parallaxSpan = Math.max(1 / pct(0.02) - 1 / pivotZ, 1 / pivotZ - 1 / info.far);
   // swayAmount: largest parallax shift, as a fraction of the picture's half-width.
   const cam = { zoom: 1, center: [0, 0], cover: true, sway: true, swayAmount: 0.05 };
-  const camPos = (t: number): Vec3 => {
-    if (!cam.sway) return [0, 0, 0];
+  // Camera motion comes from the graph's Camera node, in units of the sway amount.
+  let graphOut: RenderOut = {};
+  const camPos = (_t?: number): Vec3 => {
+    if (!cam.sway || !graphOut.camera) return [0, 0, 0];
     const a = (cam.swayAmount * tanHalfFov * aspect) / parallaxSpan;
-    if (!music) {
-      // Slow Lissajous drift. Deterministic in time.
-      // Depth motion only pushes in: pulling back shrinks near rock and exposes the picture's edges.
-      return [a * Math.sin(t * 0.3), a * 0.5 * Math.sin(t * 0.21 + 1.3), a * (1 + Math.sin(t * 0.11))];
-    }
-    // With music: the same drift, but its phase is the bar count (one sideways cycle per 4 bars),
-    // its size follows the section and the slow loudness, the camera nudges in on beats,
-    // and pushes in hard on a drop.
-    const sec = music.section(t);
-    const gain = { quiet: 0.45, build: 0.6 + 0.5 * sec.progress, drop: 1.15, normal: 0.85 }[sec.kind];
-    const amp = a * gain * (0.5 + 0.5 * music.energy(t));
-    const bar = music.bar(t);
-    const tau = 2 * Math.PI;
-    // One gentle push per bar in drops, nothing per beat: per-beat motion reads as jitter.
-    const sinceBar = (bar - Math.floor(bar)) * 4 * (60 / Math.max(music.a.tempo, 1));
-    const kick = sec.kind === "drop" ? a * 0.5 * Math.exp(-sinceBar / 0.6) : 0;
-    const dropHit = a * 3 * Math.exp(-music.sinceDrop(t) / 0.8);
-    return [
-      amp * Math.sin((tau * bar) / 4),
-      amp * 0.5 * Math.sin((tau * bar) / 8 + 1.3),
-      amp * (1 + Math.sin((tau * bar) / 16)) + kick + dropHit, // never behind the rest position
-    ];
+    const c = graphOut.camera;
+    return [c.swayX * a, c.swayY * a, c.pushZ * a];
   };
 
   // --- Music-driven searchlight ----------------------------------------------------------
@@ -350,13 +335,6 @@ async function main() {
     }
     return look.target;
   };
-  // The sun on its arc. Rest level follows the section (eased over 2 s); spurts kick it up and it crawls
-  // back. U kicks it by hand, to try the feel without music.
-  const musicSpurts: Spurt[] = music ? music.findSpurts() : [];
-  const manualSpurts: Spurt[] = [];
-  let sunMotion = new SunMotion(musicSpurts);
-  const sunGate = music ? new SunGate(music) : null;
-
   // Where the sun is on screen (ndc), and how much of it is visible: the fraction of a small disc
   // around it that is open sky. The flare uses both; behind the rock rim it dims.
   let flareVisible = 0;
@@ -382,43 +360,61 @@ async function main() {
     const sy = (qy + c[1] / (pivotZ * tanHalfFov) - cam.center[1]) * viewScale[1];
     return [sx, sy];
   };
-  const restArc = (t: number) => {
-    if (!music) return look.sunElevation;
-    let sum = 0;
-    for (let k = 0; k < 8; k++) {
-      const sec = music.section(t - k * 0.25);
-      sum += { quiet: -4, build: 6 + 14 * sec.progress, drop: 20, normal: 12 }[sec.kind];
+  // The lowest open sky in the sun's direction, seen through the gap (degrees above the camera's horizon):
+  // the Gap horizon node, so graphs can place the sun relative to the picture.
+  const gapHorizon = (() => {
+    const u = 0.5 + Math.tan((look.sunAzimuth * Math.PI) / 180) / (tanHalfFov * aspect) / 2;
+    let lowest = -1;
+    for (let v = 0; v <= 1; v += 0.002) {
+      for (const du of [-0.01, 0, 0.01]) if (depthAt(u + du, v) >= info.far * 0.98) lowest = Math.max(lowest, v);
     }
-    return sum / 8;
+    if (lowest < 0) return 10; // no sky above the sun: assume a low horizon
+    return (Math.atan((1 - 2 * lowest) * tanHalfFov) * 180) / Math.PI;
+  })();
+
+  // --- Node graph ------------------------------------------------------------------------------------
+  // The graph drives the sun, camera and tone. The editor (editor.html) talks to this page over a
+  // BroadcastChannel: it sends graph edits, this page sends back live node values.
+  const graphRes = await fetch(`graphs/${graphName}.json`);
+  if (!graphRes.ok) fail(`No graph graphs/${graphName}.json`);
+  const runtime = new GraphRuntime((await graphRes.json()) as Graph, { music, scene: { gapHorizon } });
+  const channel = new BroadcastChannel("doppler");
+  channel.onmessage = (e: MessageEvent) => {
+    const msg = e.data;
+    if (msg?.type === "graph") runtime.load(msg.graph as Graph);
+    else if (msg?.type === "hello") channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display" });
   };
-  const sunLook = (t: number): Look => {
-    const lifted = sunMotion.lift(t);
-    const h = lifted / 60; // 0 at rest, ~1 a long way up
-    const arc = restArc(t) + lifted;
-    const up = clamp(arc / 70, 0, 1); // 0 at the horizon, 1 high in the sky
-    const above = clamp((arc + 6) / 10, 0, 1); // fades out as it sets
-    const dawn: Vec3 = [1.0, 0.55, 0.3];
-    const noon: Vec3 = [1.0, 0.95, 0.88];
-    const loud = music ? 0.6 + 0.4 * music.energy(t, 2) : 1;
-    // Flicker from the hats and shakers: quick dips, like light through moving cloud.
-    const flicker = music ? 1 - 0.35 * music.flicker(t) : 1;
-    // On while the low end is in: snaps on, fades off.
-    const gate = sunGate ? sunGate.value(t) : 1;
-    return {
-      ...look,
-      sunArc: arc,
-      color: dawn.map((c, i) => c + (noon[i] - c) * up) as Vec3,
-      intensity: look.intensity * above * (0.8 + 0.8 * Math.min(1, Math.max(0, h))) * loud * flicker * gate,
-      // Flares most when the sun is low in the frame; scaled by visibility at draw time.
-      flare: look.flare * above * gate * flicker * (1 - 0.5 * up),
-      // Shafts are a low-sun thing: strongest at dawn, fading as it climbs.
-      rays: look.rays * above * (1 - 0.7 * up) * loud * gate,
-    };
+  let lastSent = 0;
+  const sendValues = (now: number) => {
+    if (now - lastSent < 66) return; // ~15 updates a second is plenty for the editor
+    lastSent = now;
+    channel.postMessage({
+      type: "values",
+      t: time,
+      track: trackName,
+      playing: !audio.paused,
+      values: Object.fromEntries(runtime.values),
+      errors: Object.fromEntries(runtime.errors),
+    });
+  };
+  let skyBoost = 0;
+  const graphLook = (base: Look): Look => {
+    const l = { ...base };
+    const tone = graphOut.tone;
+    if (tone) Object.assign(l, { baseDim: tone.baseDim, baked: tone.baked, cap: tone.cap });
+    const sun = graphOut.sun;
+    skyBoost = 0;
+    if (sun && l.sun) {
+      Object.assign(l, { sunArc: sun.arc, sunAzimuth: sun.azimuth, intensity: sun.intensity, color: sun.color as Vec3, rays: sun.rays, flare: sun.flare });
+      skyBoost = sun.skyBoost;
+    }
+    if (sun && !sun.on) l.sun = false;
+    return l;
   };
 
   const animatedLook = (t: number): Look => {
-    if (look.sun && (music || manualSpurts.length)) return sunLook(t);
-    if (!music || !autoLight) return look;
+    if (look.sun) return graphLook(look);
+    if (!music || !autoLight) return graphLook(look);
     const bar = music.bar(t);
     const i = Math.floor(bar);
     const f = bar - i;
@@ -549,12 +545,9 @@ async function main() {
     else if (key === "'") (cam.swayAmount = clamp(cam.swayAmount * 1.25, 0.005, 0.3)), updateView();
     else if (key === "k") recordClip(e.shiftKey ? 30 : 12);
     else if (key === "o") (cam.cover = !cam.cover), updateView();
+    else if (key === "e") window.open(`editor.html?graph=${graphName}`, "doppler-editor");
     else if (key === "b") benchmark();
     else if (key === "t") look.sun = !look.sun;
-    else if (key === "u") {
-      manualSpurts.push({ t: time, deg: e.shiftKey ? 40 : 20 });
-      sunMotion = new SunMotion(musicSpurts.concat(manualSpurts));
-    }
     else if (key === "1") look.flare = clamp(look.flare / 1.25, 0, 5);
     else if (key === "2") look.flare = clamp(look.flare * 1.25 || 0.05, 0, 5);
     else if (key === "5") look.rays = clamp(look.rays / 1.25, 0, 5);
@@ -579,6 +572,7 @@ async function main() {
   // --- Frame ----------------------------------------------------------------
   let time = 0;
   const draw = () => {
+    graphOut = runtime.evaluate(time);
     const look = animatedLook(time);
     if (!zBuffer || zBuffer.width !== canvas.width || zBuffer.height !== canvas.height) {
       zBuffer?.destroy();
@@ -595,7 +589,7 @@ async function main() {
       ...camPos(time), pivotZ,
       grid[0], grid[1], info.haze?.beta ?? 0, look.baked,
       look.sun ? 1 : 0, look.rays, caveDepth, 0,
-      ...sunScreen(look), 0, 0,
+      ...sunScreen(look), look.sun ? skyBoost : 0, 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
@@ -683,13 +677,15 @@ async function main() {
     if (recording) return requestAnimationFrame(frame);
     time = music ? audio.currentTime + avOffset : now / 1000;
     draw();
+    sendValues(now);
     if (!hud.hidden && !recording) {
+      const look = animatedLook(time); // what's actually on screen, after the graph
       hud.textContent =
         `${sceneName}  ·  view: ${VIEWS[view]}  ·  shadows ${look.shadows ? "on" : "off"}\n` +
         `base ${look.baseDim.toFixed(3)}  intensity ${look.intensity.toFixed(2)}  cone ${look.coneDeg.toFixed(1)}°  edge softness ${look.coneSoft.toFixed(2)}  cap ${look.cap.toFixed(2)}\n` +
         `target ${fmt(look.target)}  source ${fmt(look.source)}\n` +
         musicLine() +
-        (look.sun ? `sun arc ${(animatedLook(time).sunArc ?? look.sunElevation).toFixed(0)}°  U push sun (shift: big)\n` : "") +
+        (look.sun ? `sun arc ${(animatedLook(time).sunArc ?? look.sunElevation).toFixed(0)}°  graph ${graphName}${runtime.errors.size ? "  (" + runtime.errors.size + " node errors)" : ""}\n` : "") +
         `zoom ${cam.zoom.toFixed(2)}  ${cam.cover ? "fill" : "fit"}  sway ${cam.sway ? (cam.swayAmount * 100).toFixed(1) + "%" : "off"}\n` +
         `arrows pan · = - zoom · M sway · ; ' sway amount · O fill/fit\n` +
         `drag aim · right-drag move source (shift: depth) · wheel cone · shift+wheel intensity\n` +

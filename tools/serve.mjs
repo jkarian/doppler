@@ -37,6 +37,7 @@ const types = {
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (req.method === "POST" && url.pathname === "/capture") return saveCapture(req, res, url);
+  if (req.method === "POST" && url.pathname === "/graph") return saveGraph(req, res, url);
   let path = normalize(decodeURIComponent(url.pathname));
   if (path.endsWith("/") || path.endsWith("\\")) path = join(path, "index.html");
   const file = join(root, path);
@@ -76,5 +77,24 @@ async function saveCapture(req, res, url) {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, name), Buffer.concat(chunks));
   if (name.endsWith(".png")) console.log(`saved ${join(dir, name)}`);
+  res.writeHead(200).end();
+}
+
+// The graph editor saves graphs/<name>.json here.
+async function saveGraph(req, res, url) {
+  const name = url.searchParams.get("name") ?? "";
+  if (!/^[\w-]{1,64}$/.test(name)) return void res.writeHead(400).end("bad graph name");
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString("utf8");
+  try {
+    const graph = JSON.parse(text);
+    if (graph.version !== 1 || !Array.isArray(graph.nodes) || !Array.isArray(graph.wires)) throw new Error("not a graph");
+  } catch (err) {
+    return void res.writeHead(400).end(String(err.message ?? err));
+  }
+  await mkdir(join(root, "graphs"), { recursive: true });
+  await writeFile(join(root, "graphs", `${name}.json`), text);
+  console.log(`saved graphs/${name}.json`);
   res.writeHead(200).end();
 }

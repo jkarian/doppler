@@ -29,6 +29,33 @@ export interface Spurt {
   deg: number;
 }
 
+export interface SpurtOptions {
+  minGap: number; // seconds between bar spurts
+  sizeMin: number; // degrees, before scaling by intensity
+  sizeMax: number;
+  dropMin: number; // degrees for a drop
+  dropMax: number;
+}
+export const SPURT_DEFAULTS: SpurtOptions = { minGap: 6, sizeMin: 10, sizeMax: 30, dropMin: 35, dropMax: 45 };
+
+export interface MotionOptions {
+  rise: number; // seconds to ease up
+  hold: number; // seconds at the top
+  returnBase: number; // seconds to come back down, plus...
+  returnPerDeg: number; // ...this much per degree of height
+  max: number; // degrees above rest
+  omega: number; // spring frequency: lower = heavier
+}
+export const MOTION_DEFAULTS: MotionOptions = { rise: 1.2, hold: 1.0, returnBase: 5, returnPerDeg: 1 / 8, max: 75, omega: 2.2 };
+
+export interface GateOptions {
+  on: number; // switch on above this fraction of the track's range
+  off: number; // switch off below this fraction
+  attack: number; // seconds
+  release: number; // seconds
+}
+export const GATE_DEFAULTS: GateOptions = { on: 0.5, off: 0.35, attack: 0.08, release: 1.2 };
+
 export class Music {
   readonly a: Analysis;
   private readonly period: number;
@@ -45,11 +72,12 @@ export class Music {
    * excepted), so there's time to see it crawl back. The amount is "random" from a fixed seed per bar,
    * so the same track always moves the sun the same way.
    */
-  findSpurts(): Spurt[] {
-    const MIN_GAP = 6;
+  findSpurts(opt: Partial<SpurtOptions> = {}): Spurt[] {
+    const o = { ...SPURT_DEFAULTS, ...opt };
+    const MIN_GAP = o.minGap;
     const drops = this.a.sections.filter((s) => s.kind === "drop").map((s) => s.start);
     // Drops always get a big spurt.
-    const candidates: (Spurt & { drop: boolean })[] = drops.map((t, i) => ({ t, deg: 35 + 10 * seeded(9000 + i)(), drop: true }));
+    const candidates: (Spurt & { drop: boolean })[] = drops.map((t, i) => ({ t, deg: o.dropMin + (o.dropMax - o.dropMin) * seeded(9000 + i)(), drop: true }));
     for (const [i, t] of this.a.downbeats.entries()) {
       // A hit: the low end punching in, or the music getting noticeably more intense than a bar ago.
       const hit = Math.max(
@@ -60,7 +88,7 @@ export class Music {
       const sec = this.section(t);
       if (sec.kind === "quiet" || !(hit > 0.05 || (sec.kind === "drop" && this.bass(t + 0.05) > 0.6))) continue;
       const intensity = 0.4 + 0.6 * this.energy(t, 1);
-      candidates.push({ t, deg: (10 + 20 * seeded(5000 + i)()) * intensity, drop: false });
+      candidates.push({ t, deg: (o.sizeMin + (o.sizeMax - o.sizeMin) * seeded(5000 + i)()) * intensity, drop: false });
     }
     candidates.sort((a, b) => a.t - b.t);
     const spurts: Spurt[] = [];
@@ -108,6 +136,21 @@ export class Music {
   /** Bars since the first downbeat, fractional. */
   bar(t: number): number {
     return this.position(this.a.downbeats, t, this.period * 4);
+  }
+
+  /**
+   * Kick pump, like sidechain compression: a quick swell on each beat (ATTACK) and a slower release,
+   * weighted by how hard the kick hits. Felt rather than flashed.
+   */
+  pump(t: number, attack = 0.05, release = 0.4): number {
+    const i = upperBound(this.a.beats, t) - 1;
+    let v = 0;
+    for (let k = i; k >= 0 && t - this.a.beats[k] < attack + 4 * release; k--) {
+      const x = t - this.a.beats[k];
+      const shape = x < attack ? Math.sin((Math.PI / 2) * (x / attack)) : Math.exp(-(x - attack) / release);
+      v = Math.max(v, shape * (0.3 + 0.7 * this.sub(this.a.beats[k] + 0.03)));
+    }
+    return v;
   }
 
   /** 1 on each beat, decaying with the given time constant. Bass-heavy beats hit harder. */
@@ -166,9 +209,7 @@ export class Music {
  * A spurt starts from wherever the sun is. Precomputed, so any time can be evaluated directly.
  */
 export class SunMotion {
-  static readonly JUMP = 1.2;
-  static readonly HOLD = 1.0;
-  static readonly MAX = 75;
+  private readonly o: MotionOptions;
   private readonly t: number[] = [];
   private readonly from: number[] = [];
   private readonly to: number[] = [];
@@ -176,22 +217,22 @@ export class SunMotion {
   // The sun itself follows the eased target like a heavy mass on a critically damped spring:
   // no abrupt starts, stops or reversals. Simulated once at RATE Hz; lift() interpolates.
   static readonly RATE = 60;
-  static readonly OMEGA = 2.2; // lower = heavier
   private readonly samples: Float32Array;
 
-  constructor(spurts: Spurt[]) {
+  constructor(spurts: Spurt[], opt: Partial<MotionOptions> = {}) {
+    this.o = { ...MOTION_DEFAULTS, ...opt };
     for (const s of [...spurts].sort((a, b) => a.t - b.t)) {
       const level = this.target(s.t);
       this.t.push(s.t);
       this.from.push(level);
       // Diminishing kicks: the higher it already is, the less a spurt adds.
-      this.to.push(Math.min(SunMotion.MAX, level + s.deg * (1 - level / SunMotion.MAX) ** 1.5));
+      this.to.push(Math.min(this.o.max, level + s.deg * Math.max(0, 1 - level / this.o.max) ** 1.5));
     }
     const end = (this.t.at(-1) ?? 0) + 30;
     const n = Math.ceil(end * SunMotion.RATE) + 1;
     this.samples = new Float32Array(n);
     const dt = 1 / SunMotion.RATE;
-    const w = SunMotion.OMEGA;
+    const w = this.o.omega;
     let x = 0;
     let v = 0;
     for (let k = 0; k < n; k++) {
@@ -214,8 +255,8 @@ export class SunMotion {
   }
 
   /** Seconds to come back down from a given height. */
-  private static returnTime(peak: number): number {
-    return 5 + peak / 8;
+  private returnTime(peak: number): number {
+    return this.o.returnBase + peak * this.o.returnPerDeg;
   }
 
   /** Where the spurts are pulling the sun: eased up, hold, long S back down. */
@@ -224,10 +265,10 @@ export class SunMotion {
     if (i < 0) return 0;
     const x = t - this.t[i];
     const peak = this.to[i];
-    if (x < SunMotion.JUMP) return this.from[i] + (peak - this.from[i]) * ease(x / SunMotion.JUMP);
-    const y = x - SunMotion.JUMP - SunMotion.HOLD;
+    if (x < this.o.rise) return this.from[i] + (peak - this.from[i]) * ease(x / this.o.rise);
+    const y = x - this.o.rise - this.o.hold;
     if (y < 0) return peak;
-    return peak * (1 - ease(Math.min(1, y / SunMotion.returnTime(peak))));
+    return peak * (1 - ease(Math.min(1, y / this.returnTime(peak))));
   }
 }
 
@@ -239,11 +280,11 @@ export class SunMotion {
  */
 export class SunGate {
   static readonly RATE = 60;
-  static readonly ATTACK = 0.08; // seconds: snaps on
-  static readonly RELEASE = 1.2; // seconds: fades off over a couple of seconds
+
   private readonly samples: Float32Array;
 
-  constructor(music: Music) {
+  constructor(music: Music, opt: Partial<GateOptions> = {}) {
+    const o = { ...GATE_DEFAULTS, ...opt };
     // Kick presence and intensity together: the sun is out when the kick is in and the music is
     // intense; it goes dark in breakdowns, intros, and when the kick cuts.
     const signal = (t: number) => 0.3 * music.sub(t) + 0.7 * music.intensity(t);
@@ -254,8 +295,8 @@ export class SunGate {
     const pct = (f: number) => sorted[Math.floor((sorted.length - 1) * f)] ?? 0;
     const lo = pct(0.15);
     const hi = pct(0.95);
-    const on = lo + 0.6 * (hi - lo);
-    const off = lo + 0.45 * (hi - lo);
+    const on = lo + o.on * (hi - lo);
+    const off = lo + Math.min(o.off, o.on) * (hi - lo);
     const n = Math.ceil(music.a.duration * SunGate.RATE) + 1;
     this.samples = new Float32Array(n);
     const dt = 1 / SunGate.RATE;
@@ -268,7 +309,7 @@ export class SunGate {
       bass /= 10;
       if (!lit && bass > on) lit = true;
       else if (lit && bass < off) lit = false;
-      const tau = lit ? SunGate.ATTACK : SunGate.RELEASE;
+      const tau = Math.max(1e-3, lit ? o.attack : o.release);
       level += ((lit ? 1 : 0) - level) * (1 - Math.exp(-dt / tau));
       this.samples[k] = level;
     }

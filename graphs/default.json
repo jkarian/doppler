@@ -1,0 +1,866 @@
+{
+ "version": 1,
+ "nodes": [
+  {
+   "id": "horizon",
+   "type": "GapHorizon",
+   "pos": [
+    40,
+    20
+   ],
+   "name": "Gap horizon"
+  },
+  {
+   "id": "rest",
+   "type": "Section",
+   "pos": [
+    40,
+    104
+   ],
+   "name": "Rest height by section",
+   "params": {
+    "quiet": -6,
+    "buildStart": -2,
+    "buildEnd": 6,
+    "drop": 7,
+    "normal": 3,
+    "ease": 2
+   }
+  },
+  {
+   "id": "spurts",
+   "type": "Spurts",
+   "pos": [
+    40,
+    356
+   ],
+   "name": "Sun spurts"
+  },
+  {
+   "id": "gate",
+   "type": "Gate",
+   "pos": [
+    40,
+    704
+   ],
+   "name": "Sun on/off"
+  },
+  {
+   "id": "pump",
+   "type": "Pump",
+   "pos": [
+    40,
+    884
+   ],
+   "name": "Kick pump"
+  },
+  {
+   "id": "hats",
+   "type": "Hats",
+   "pos": [
+    40,
+    1016
+   ],
+   "name": "Hats flicker"
+  },
+  {
+   "id": "energy",
+   "type": "Intensity",
+   "pos": [
+    40,
+    1100
+   ],
+   "name": "Intensity",
+   "params": {
+    "window": 2
+   }
+  },
+  {
+   "id": "arc",
+   "type": "Expression",
+   "pos": [
+    300,
+    20
+   ],
+   "name": "Sun arc",
+   "params": {
+    "expr": "a + b + c"
+   }
+  },
+  {
+   "id": "up",
+   "type": "Expression",
+   "pos": [
+    300,
+    224
+   ],
+   "name": "Height 0..1",
+   "params": {
+    "expr": "clamp(a / 70, 0, 1)"
+   }
+  },
+  {
+   "id": "above",
+   "type": "Expression",
+   "pos": [
+    300,
+    380
+   ],
+   "name": "Above horizon",
+   "params": {
+    "expr": "clamp((a + 6) / 10, 0, 1)"
+   }
+  },
+  {
+   "id": "ember",
+   "type": "Expression",
+   "pos": [
+    300,
+    848
+   ],
+   "name": "Ember (off = 20%)",
+   "params": {
+    "expr": "0.2 + 0.8 * a"
+   }
+  },
+  {
+   "id": "flick",
+   "type": "Expression",
+   "pos": [
+    300,
+    1004
+   ],
+   "name": "Flicker dip",
+   "params": {
+    "expr": "1 - 0.5 * a"
+   }
+  },
+  {
+   "id": "loud",
+   "type": "Expression",
+   "pos": [
+    300,
+    1160
+   ],
+   "name": "Loudness factor",
+   "params": {
+    "expr": "0.6 + 0.4 * a"
+   }
+  },
+  {
+   "id": "intensity",
+   "type": "Expression",
+   "pos": [
+    620,
+    20
+   ],
+   "name": "Sun intensity",
+   "params": {
+    "expr": "2.2 * a * (0.8 + 0.8 * clamp(b / 60, 0, 1)) * c * d * e * (1 + 0.15 * f)"
+   }
+  },
+  {
+   "id": "flare",
+   "type": "Expression",
+   "pos": [
+    620,
+    272
+   ],
+   "name": "Flare",
+   "params": {
+    "expr": "0.8 * a * b * c * (1 - 0.5 * d) * (0.85 + 0.3 * e)"
+   }
+  },
+  {
+   "id": "rays",
+   "type": "Expression",
+   "pos": [
+    620,
+    524
+   ],
+   "name": "Shafts",
+   "params": {
+    "expr": "0.6 * a * (1 - 0.7 * b) * c * d * (0.75 + 0.5 * e)"
+   }
+  },
+  {
+   "id": "sky",
+   "type": "Expression",
+   "pos": [
+    620,
+    776
+   ],
+   "name": "Sky pump",
+   "params": {
+    "expr": "0.35 * a * b"
+   }
+  },
+  {
+   "id": "dawn",
+   "type": "Color",
+   "pos": [
+    300,
+    536
+   ],
+   "name": "Dawn",
+   "params": {
+    "r": 1,
+    "g": 0.55,
+    "b": 0.3
+   }
+  },
+  {
+   "id": "noon",
+   "type": "Color",
+   "pos": [
+    300,
+    692
+   ],
+   "name": "Noon",
+   "params": {
+    "r": 1,
+    "g": 0.95,
+    "b": 0.88
+   }
+  },
+  {
+   "id": "sunColor",
+   "type": "MixColor",
+   "pos": [
+    620,
+    956
+   ],
+   "name": "Sun colour"
+  },
+  {
+   "id": "sun",
+   "type": "Sun",
+   "pos": [
+    1000,
+    300
+   ],
+   "name": "Sun",
+   "params": {
+    "azimuth": 3
+   }
+  },
+  {
+   "id": "bar",
+   "type": "Bar",
+   "pos": [
+    40,
+    1232
+   ],
+   "name": "Bars"
+  },
+  {
+   "id": "camGain",
+   "type": "Section",
+   "pos": [
+    40,
+    1340
+   ],
+   "name": "Sway by section",
+   "params": {
+    "quiet": 0.45,
+    "buildStart": 0.6,
+    "buildEnd": 1.1,
+    "drop": 1.15,
+    "normal": 0.85,
+    "ease": 0.5
+   }
+  },
+  {
+   "id": "isDrop",
+   "type": "Section",
+   "pos": [
+    40,
+    1592
+   ],
+   "name": "In a drop",
+   "params": {
+    "quiet": 0,
+    "buildStart": 0,
+    "buildEnd": 0,
+    "drop": 1,
+    "normal": 0,
+    "ease": 0
+   }
+  },
+  {
+   "id": "dropHit",
+   "type": "DropHit",
+   "pos": [
+    40,
+    1844
+   ],
+   "name": "Drop hit",
+   "params": {
+    "decay": 0.8
+   }
+  },
+  {
+   "id": "amp",
+   "type": "Expression",
+   "pos": [
+    300,
+    1316
+   ],
+   "name": "Sway size",
+   "params": {
+    "expr": "a * (0.5 + 0.5 * b)"
+   }
+  },
+  {
+   "id": "swayX",
+   "type": "Oscillator",
+   "pos": [
+    620,
+    1112
+   ],
+   "name": "Sideways: 1 cycle / 4 bars",
+   "params": {
+    "cycles": 0.25
+   }
+  },
+  {
+   "id": "swayY",
+   "type": "Expression",
+   "pos": [
+    620,
+    1316
+   ],
+   "name": "Up/down: 1 cycle / 8 bars",
+   "params": {
+    "expr": "0.5 * a * sin(tau * b / 8 + 1.3)"
+   }
+  },
+  {
+   "id": "pushZ",
+   "type": "Expression",
+   "pos": [
+    620,
+    1496
+   ],
+   "name": "Push in",
+   "params": {
+    "expr": "a * (1 + sin(tau * b / 16)) + 0.5 * c * exp(-d * 3.3) + 3 * e"
+   }
+  },
+  {
+   "id": "camera",
+   "type": "Camera",
+   "pos": [
+    1000,
+    1450
+   ],
+   "name": "Camera"
+  },
+  {
+   "id": "tone",
+   "type": "Tone",
+   "pos": [
+    1000,
+    1800
+   ],
+   "name": "Tone",
+   "params": {
+    "baseDim": 0.14,
+    "baked": 0.1,
+    "cap": 1.4
+   }
+  }
+ ],
+ "wires": [
+  {
+   "from": [
+    "horizon",
+    "degrees"
+   ],
+   "to": [
+    "arc",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "rest",
+    "value"
+   ],
+   "to": [
+    "arc",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "spurts",
+    "lift"
+   ],
+   "to": [
+    "arc",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "arc",
+    "value"
+   ],
+   "to": [
+    "up",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "arc",
+    "value"
+   ],
+   "to": [
+    "above",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "gate",
+    "value"
+   ],
+   "to": [
+    "ember",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "hats",
+    "value"
+   ],
+   "to": [
+    "flick",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "energy",
+    "slow"
+   ],
+   "to": [
+    "loud",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "above",
+    "value"
+   ],
+   "to": [
+    "intensity",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "spurts",
+    "lift"
+   ],
+   "to": [
+    "intensity",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "loud",
+    "value"
+   ],
+   "to": [
+    "intensity",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "flick",
+    "value"
+   ],
+   "to": [
+    "intensity",
+    "d"
+   ]
+  },
+  {
+   "from": [
+    "ember",
+    "value"
+   ],
+   "to": [
+    "intensity",
+    "e"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "intensity",
+    "f"
+   ]
+  },
+  {
+   "from": [
+    "above",
+    "value"
+   ],
+   "to": [
+    "flare",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "ember",
+    "value"
+   ],
+   "to": [
+    "flare",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "flick",
+    "value"
+   ],
+   "to": [
+    "flare",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "up",
+    "value"
+   ],
+   "to": [
+    "flare",
+    "d"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "flare",
+    "e"
+   ]
+  },
+  {
+   "from": [
+    "above",
+    "value"
+   ],
+   "to": [
+    "rays",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "up",
+    "value"
+   ],
+   "to": [
+    "rays",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "loud",
+    "value"
+   ],
+   "to": [
+    "rays",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "ember",
+    "value"
+   ],
+   "to": [
+    "rays",
+    "d"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "rays",
+    "e"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "sky",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "ember",
+    "value"
+   ],
+   "to": [
+    "sky",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "dawn",
+    "color"
+   ],
+   "to": [
+    "sunColor",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "noon",
+    "color"
+   ],
+   "to": [
+    "sunColor",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "up",
+    "value"
+   ],
+   "to": [
+    "sunColor",
+    "k"
+   ]
+  },
+  {
+   "from": [
+    "arc",
+    "value"
+   ],
+   "to": [
+    "sun",
+    "arc"
+   ]
+  },
+  {
+   "from": [
+    "intensity",
+    "value"
+   ],
+   "to": [
+    "sun",
+    "intensity"
+   ]
+  },
+  {
+   "from": [
+    "rays",
+    "value"
+   ],
+   "to": [
+    "sun",
+    "rays"
+   ]
+  },
+  {
+   "from": [
+    "flare",
+    "value"
+   ],
+   "to": [
+    "sun",
+    "flare"
+   ]
+  },
+  {
+   "from": [
+    "sky",
+    "value"
+   ],
+   "to": [
+    "sun",
+    "skyBoost"
+   ]
+  },
+  {
+   "from": [
+    "sunColor",
+    "color"
+   ],
+   "to": [
+    "sun",
+    "color"
+   ]
+  },
+  {
+   "from": [
+    "camGain",
+    "value"
+   ],
+   "to": [
+    "amp",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "energy",
+    "slow"
+   ],
+   "to": [
+    "amp",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "swayX",
+    "phase"
+   ]
+  },
+  {
+   "from": [
+    "amp",
+    "value"
+   ],
+   "to": [
+    "swayX",
+    "amplitude"
+   ]
+  },
+  {
+   "from": [
+    "amp",
+    "value"
+   ],
+   "to": [
+    "swayY",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "swayY",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "amp",
+    "value"
+   ],
+   "to": [
+    "pushZ",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "pushZ",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "isDrop",
+    "value"
+   ],
+   "to": [
+    "pushZ",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "phase"
+   ],
+   "to": [
+    "pushZ",
+    "d"
+   ]
+  },
+  {
+   "from": [
+    "dropHit",
+    "hit"
+   ],
+   "to": [
+    "pushZ",
+    "e"
+   ]
+  },
+  {
+   "from": [
+    "swayX",
+    "value"
+   ],
+   "to": [
+    "camera",
+    "swayX"
+   ]
+  },
+  {
+   "from": [
+    "swayY",
+    "value"
+   ],
+   "to": [
+    "camera",
+    "swayY"
+   ]
+  },
+  {
+   "from": [
+    "pushZ",
+    "value"
+   ],
+   "to": [
+    "camera",
+    "pushZ"
+   ]
+  }
+ ]
+}
