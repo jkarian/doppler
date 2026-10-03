@@ -160,10 +160,14 @@ struct LaserLight {
   rock: vec3f,
 };
 
-// Glow across a beam, x = 0 at its centre to 1 at the edge of the glow: a sharp bright core that
-// drops to about a fifth within the first eighth, then a long faint tail into the haze.
-fn glowProfile(x: f32) -> f32 {
-  return 0.75 * exp(-x / 0.04) + 0.25 * exp(-x / 0.25);
+// Brightness across a beam at angle `ang` from its centre: a solid core (100%) as wide as the beam,
+// with a soft anti-aliased edge; right outside it the glow starts at 40% and falls to 0 over
+// `glow` beam widths: quickly at first, then a long faint tail into the haze.
+fn beamProfile(ang: f32, width: f32, glow: f32) -> f32 {
+  let core = 1.0 - smoothstep(width * 0.35, width * 0.65, ang);
+  let y = max(0.0, ang - width * 0.5) / (width * glow);
+  let tail = 0.4 * (0.75 * exp(-y / 0.04) + 0.25 * exp(-y / 0.25));
+  return core + (1.0 - core) * tail;
 }
 
 // How far into the vista a distance is: 0 at the camera, 1 at the farthest land (log distance).
@@ -242,7 +246,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         }
       }
       // A sheet reads as a plane: its individual beams fade back.
-      g += 2.0 * glowProfile(ang / (drawAng * L.glow)) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
+      g += 3.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
