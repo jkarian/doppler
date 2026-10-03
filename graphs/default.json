@@ -221,9 +221,9 @@
    ],
    "name": "Sun",
    "params": {
-    "azimuth": 14.65,
+    "azimuth": 12.2,
     "enabled": 1,
-    "maxArc": 35.5,
+    "maxArc": 13.2,
     "floorLight": 0,
     "gain": 3,
     "bounce": 0.5,

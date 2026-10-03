@@ -223,7 +223,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 68;
+  const UNIFORM_FLOATS = 72;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
   const LASER_FLOATS = 4 + 4 * 24 + 192 * 4;
   const laserData = new Float32Array(LASER_FLOATS);
@@ -297,6 +297,28 @@ async function main() {
     (1 - v * 2) * tanHalfFov * z,
     z,
   ];
+
+  // --- Real-world frame ------------------------------------------------------
+  // The photo's camera looks down a little (about 23 degrees on the canyon), so its own "up" leans into the
+  // scene. True vertical comes from the flat ground (scene.json "up"). Sun heights, rig aims, the sky
+  // gradient and "flat ground" are all measured against it.
+  const UP = normalize((info.up ?? [0, 1, 0]) as Vec3);
+  const FWD = normalize([-UP[0] * UP[2], -UP[1] * UP[2], 1 - UP[2] * UP[2]] as Vec3); // into the scene, level
+  const RIGHT = cross(UP, FWD);
+  /** A direction from real-world turn (0 = into the scene, + right) and tilt (up from level), radians. */
+  const worldDir = (turnRad: number, tiltRad: number): Vec3 => {
+    const h = Math.cos(tiltRad);
+    return [0, 1, 2].map((j) => RIGHT[j] * Math.sin(turnRad) * h + UP[j] * Math.sin(tiltRad) + FWD[j] * Math.cos(turnRad) * h) as Vec3;
+  };
+  /** Real-world turn and tilt (degrees) of a scene direction. */
+  const worldAngles = (d: Vec3): [number, number] => {
+    const n = normalize(d);
+    const dot = (a: Vec3) => n[0] * a[0] + n[1] * a[1] + n[2] * a[2];
+    return [(Math.atan2(dot(RIGHT), dot(FWD)) * 180) / Math.PI, (Math.asin(clamp(dot(UP), -1, 1)) * 180) / Math.PI];
+  };
+  // The sun along its arc (0 front horizon, 90 overhead, 180 behind), in the real-world frame.
+  const sunDirection = (l: { sunAzimuth: number; sunElevation: number; sunArc?: number }): Vec3 =>
+    worldDir((l.sunAzimuth * Math.PI) / 180, ((l.sunArc ?? l.sunElevation) * Math.PI) / 180);
 
   // --- Look state ------------------------------------------------------------
   const defaults = (): Look => {
@@ -388,16 +410,17 @@ async function main() {
     const sy = (qy + c[1] / (pivotZ * tanHalfFov) - cam.center[1]) * viewScale[1];
     return [sx, sy];
   };
-  // The lowest open sky in the sun's direction, seen through the gap (degrees above the camera's horizon):
+  // The lowest open sky in the sun's direction, seen through the gap (degrees above the real horizon):
   // the Gap horizon node, so graphs can place the sun relative to the picture.
   const gapHorizon = (() => {
-    const u = 0.5 + Math.tan((look.sunAzimuth * Math.PI) / 180) / (tanHalfFov * aspect) / 2;
+    const d = worldDir((look.sunAzimuth * Math.PI) / 180, 0);
+    const u = d[2] > 0.05 ? 0.5 + d[0] / (d[2] * tanHalfFov * aspect) / 2 : 0.5;
     let lowest = -1;
     for (let v = 0; v <= 1; v += 0.002) {
       for (const du of [-0.01, 0, 0.01]) if (depthAt(u + du, v) >= info.far * 0.98) lowest = Math.max(lowest, v);
     }
-    if (lowest < 0) return 10; // no sky above the sun: assume a low horizon
-    return (Math.atan((1 - 2 * lowest) * tanHalfFov) * 180) / Math.PI;
+    if (lowest < 0) return 0; // no sky above the sun: assume the real horizon
+    return worldAngles(viewPos(u, lowest, 1))[1];
   })();
 
   // --- Node graph ------------------------------------------------------------------------------------
@@ -585,15 +608,7 @@ async function main() {
   };
   const project3 = (p: Vec3): [number, number] => [(p[0] / (p[2] * tanHalfFov * aspect)) * 0.5 + 0.5, 0.5 - (p[1] / (p[2] * tanHalfFov)) * 0.5];
   // Rigs aim by real-world angles: turn around true vertical (0 = into the scene, + right) and tilt up from
-  // level ground, so tilt 90 is straight up into the sky. The photo's camera looks down a little, so its own
-  // "up" leans into the scene; true vertical comes from the flat ground (scene.json "up").
-  const UP = normalize((info.up ?? [0, 1, 0]) as Vec3);
-  const FWD = normalize([-UP[0] * UP[2], -UP[1] * UP[2], 1 - UP[2] * UP[2]] as Vec3); // into the scene, level
-  const RIGHT = cross(UP, FWD);
-  const worldDir = (turnRad: number, tiltRad: number): Vec3 => {
-    const h = Math.cos(tiltRad);
-    return [0, 1, 2].map((j) => RIGHT[j] * Math.sin(turnRad) * h + UP[j] * Math.sin(tiltRad) + FWD[j] * Math.cos(turnRad) * h) as Vec3;
-  };
+  // level ground (see worldDir), so tilt 90 is straight up into the sky.
   // A rig stands just in front of the rock at its spot.
   const rigOrigin = (u: number, v: number) => viewPos(u, v, depthAt(u, v) * 0.985);
   const rigAim = (q: number[]) => {
@@ -882,10 +897,9 @@ async function main() {
     const [u, v] = toImageUv(e);
     if (look.sun) {
       // The sun sits where the pointer is: its direction is the view ray through that point.
-      const dir = [(u * 2 - 1) * tanHalfFov * aspect, (1 - v * 2) * tanHalfFov, 1];
-      const len = Math.hypot(...dir);
-      look.sunAzimuth = (Math.atan2(dir[0], dir[2]) * 180) / Math.PI;
-      look.sunElevation = clamp((Math.asin(dir[1] / len) * 180) / Math.PI, 1, 89);
+      const [turn, tilt] = worldAngles(viewPos(u, v, 1));
+      look.sunAzimuth = turn;
+      look.sunElevation = clamp(tilt, 1, 89);
       return;
     }
     if (u < 0 || u > 1 || v < 0 || v > 1) return;
@@ -1000,6 +1014,7 @@ async function main() {
       ...scanUniforms(graphOut.scan),
       ...skyUniforms(),
       look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, 0,
+      ...UP, 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
@@ -1368,11 +1383,6 @@ const normalize = (a: Vec3): Vec3 => {
  * Unit vector toward the sun, in scene space (x right, y up, z into the scene). With an arc angle, the sun
  * sits on the vertical half-circle through its azimuth: 0 front horizon, 90 overhead, 180 behind us.
  */
-const sunDirection = (l: { sunAzimuth: number; sunElevation: number; sunArc?: number }): Vec3 => {
-  const az = (l.sunAzimuth * Math.PI) / 180;
-  const arc = ((l.sunArc ?? l.sunElevation) * Math.PI) / 180;
-  return [Math.sin(az) * Math.cos(arc), Math.sin(arc), Math.cos(az) * Math.cos(arc)];
-};
 // Storage can be unavailable (private windows, blocked site data): the offset just falls back to 0.
 const safeGet = (k: string) => {
   try {

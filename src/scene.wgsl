@@ -41,6 +41,7 @@ struct Uniforms {
   skyA: vec4f,         // sky gradient: mix with the photo, brightness, clouds, glow around the sun
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
   sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth (fraction of distance), -
+  up: vec4f,           // true vertical in scene space (the photo's camera looks down a little), -
 };
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
@@ -65,7 +66,7 @@ fn skyRamp(t: f32, look: i32) -> vec3f {
 
 fn skyGradient(uv: vec2f) -> vec3f {
   let dir = normalize(viewPos(uv, 1.0));
-  let t = clamp((asin(dir.y) - u.skyB.y) / u.skyB.z, 0.0, 1.0);
+  let t = clamp((asin(dot(dir, u.up.xyz)) - u.skyB.y) / u.skyB.z, 0.0, 1.0);
   let s = u.skyB.x;
   let toGold = smoothstep(2.0, 14.0, s);
   let toDay = smoothstep(14.0, 35.0, s);
@@ -615,8 +616,9 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   // Sun on the floor can be held back so it lights the walls and high ground, however high it climbs.
   // Floor: flat ground (normal pointing up) that is low (the canyon floor, the river) or part of the cave
   // around us. Plateau tops and high ledges are flat too, but stay lit.
-  let flat = smoothstep(0.55, 0.85, n.y);
-  let low = max(1.0 - smoothstep(u.skyB.w - 0.02 * z, u.skyB.w + 0.02 * z, p.y), 1.0 - smoothstep(u.caveDepth * 0.8, u.caveDepth, z));
+  let nUp = dot(n, u.up.xyz);
+  let flat = smoothstep(0.55, 0.85, nUp);
+  let low = max(1.0 - smoothstep(u.skyB.w - 0.02 * z, u.skyB.w + 0.02 * z, dot(p, u.up.xyz)), 1.0 - smoothstep(u.caveDepth * 0.8, u.caveDepth, z));
   let floorK = select(1.0, mix(1.0, u.sunFloor, flat * low), u.sun > 0.5);
   var nook = vec3f(0.0);
   for (var i = 0u; i < min(nooks.count, 16u); i++) {
@@ -634,14 +636,14 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   var bounce = 0.0;
   if (u.sun > 0.5 && u.sunB.x > 0.0) {
     let up = smoothstep(-5.0, 30.0, u.skyB.x);
-    bounce = u.sunB.x * up * (1.0 - ndl * shadow) * (0.6 + 0.4 * max(n.y, 0.0));
+    bounce = u.sunB.x * up * (1.0 - ndl * shadow) * (0.6 + 0.4 * max(nUp, 0.0));
   }
   let light = select(u.lightColor * (u.intensity * (ndl * hit.amount * shadow + 0.25 * bounce) * haze * floorK) + nook * haze, vec3f(0.0), sky);
 
   // Base: the de-lit rock under soft night-sky light from above (cool) and bounce from below (warm),
   // so the photo's own daylight, haze and sun shafts don't show. `baked` mixes the photo back in.
   // The sky itself keeps the photo.
-  let ambient = mix(vec3f(0.18, 0.14, 0.12), vec3f(0.42, 0.50, 0.65), 0.5 + 0.5 * n.y);
+  let ambient = mix(vec3f(0.18, 0.14, 0.12), vec3f(0.42, 0.50, 0.65), 0.5 + 0.5 * dot(n, u.up.xyz));
   var skyColor = photo;
   if (sky && u.skyA.x > 0.0) {
     // The gradient, with the photo's clouds kept as texture (its brightness against its own blurred self).

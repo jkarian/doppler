@@ -58,6 +58,12 @@ npm run dev
   brightness; blue rings = near lights) and laser rigs (drag to move, aim handle for turn/tilt, scroll for the
   search cone). Banner at the top lists the controls.
 
+## Real-world angles
+
+The photo's camera looks down about 23 degrees. scene.json `up` (measured by scene_prep from the flat
+ground) gives true vertical; sun height and direction, the gap's horizon, rig turn/tilt, the sky gradient,
+flat-ground detection and bounce all use it. Sun heights are true degrees above the horizon.
+
 ## Current look (default graph)
 
 Everything is a **setup** (a module) switched by the song's sections through a Setup node: master on/off,
@@ -68,7 +74,7 @@ which section kinds it plays in, fades. The user wants setups combined in drops,
   tick on the left half, tock on the right, fade 2 s); near lights (under 8000 ft) only on drops (fade 4.5 s).
 - Sun (always): rests just above the gap's horizon, spurts on strong bars and drops (heavy, eased); colour by
   height (SunTint: red-orange low to near white high); lights walls and high ground, not the floor
-  (floorLight 0, floor = flat ground below -1500 ft or the cave floor); bounce light into shaded faces; gain 3,
+  (floorLight 0, floor = flat ground below -4300 ft real height, or the cave floor); bounce light into shaded faces; gain 3,
   brightness cap 2.5; ceiling (maxArc) set by the user. Sky: gradient by sun height (dusk from the user's
   reference, golden, day) with the photo's clouds as texture.
 - Ground laser rigs (builds, drops, normal): six hand-placed rigs re-aiming within 30 degree cones every 2 bars.
