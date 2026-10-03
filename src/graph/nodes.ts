@@ -23,6 +23,7 @@ export interface InputDef {
 
 export interface SceneConsts {
   gapHorizon: number; // degrees: lowest open sky above the sun, seen through the gap
+  depthFeet?: (u: number, v: number) => number; // real-world distance of a picture point
 }
 
 /** What the output nodes produce for the renderer. Anything left out keeps the display's own setting. */
@@ -702,9 +703,10 @@ const defs: NodeDef[] = [
       "Small lights tucked into nooks in the rock, each washing a pool of light over the walls around it (cut off where rock " +
       "juts out in between). Each hit of the named sounds switches one on: it rises over attack seconds and eases out over " +
       "decay. positions: u,v[,area,brightness] picture points separated by ; (place them on the display with N: drag, scroll for " +
-      "area, shift+scroll for brightness). sounds: names separated by |. " +
-      "pattern 0: hits walk through the lights in order; 1: the first sound fires the left half, the second the right half; " +
-      "2: seeded random. Up to 3 show at once.",
+      "area, shift+scroll for brightness). Lights further than near feet (mid and far ground) are fired by the sounds " +
+      "(names separated by |): pattern 0 walks through them in order, 1 sends the first sound to the left half and the second " +
+      "to the right, 2 is seeded random. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
+      "by |): all of them come on together and fade over nearDecay. Up to 8 show at once, the brightest 3 with shadows.",
     inputs: [
       { name: "positions", default: "0.5,0.7", kind: "const" },
       { name: "sounds", default: "tick|tock", kind: "const" },
@@ -712,6 +714,9 @@ const defs: NodeDef[] = [
       { name: "seed", default: 1, kind: "const", step: 1 },
       { name: "attack", default: 0.04, kind: "const", min: 0, max: 2, step: 0.01, doc: "seconds to come on" },
       { name: "decay", default: 2, kind: "const", min: 0.05, max: 10, step: 0.05, doc: "seconds to go out" },
+      { name: "near", default: 8000, kind: "const", min: 0, max: 60000, step: 100, doc: "feet: lights nearer than this are kept for bigger moments" },
+      { name: "moments", default: "drops|phrases", kind: "const", doc: "what fires the near lights: drops, phrases (8-bar lines)" },
+      { name: "nearDecay", default: 4.5, kind: "const", min: 0.05, max: 20, step: 0.05, doc: "seconds for near lights to go out" },
       { name: "radius", default: 800, min: 20, max: 10000, step: 10, doc: "feet: how far each pool reaches (each light can scale it: scroll over its ring with N)" },
       { name: "standoff", default: 0.3, min: 0, max: 2, step: 0.01, doc: "distance in front of the rock, as a fraction of the pool's radius" },
       { name: "color", default: [1, 0.55, 0.22] },
@@ -725,14 +730,19 @@ const defs: NodeDef[] = [
         .map((p) => p.split(",").map(Number))
         .filter((p) => p.length >= 2 && p.length <= 4 && p.every(Number.isFinite))
         .map(([u, v, r = 1, b = 1]) => [u, v, r, b]) as [number, number, number, number][];
-      const n = pts.length;
-      const order = pts.map((p, k) => k).sort((a, b) => pts[a][0] - pts[b][0]); // left to right
+      // Near lights (in front) wait for big moments; mid and far ones answer the sounds.
+      const nearFeet = num(c.near);
+      const isNear = pts.map(([u, v]) => (ctx.scene.depthFeet ? ctx.scene.depthFeet(u, v) < nearFeet : false));
+      const far = pts.map((_, k) => k).filter((k) => !isNear[k]);
+      const near = pts.map((_, k) => k).filter((k) => isNear[k]);
+      const n = far.length;
+      const order = [...far].sort((a, b) => pts[a][0] - pts[b][0]); // left to right
       const groups = String(c.sounds).split("|").map((s) => s.trim()).filter(Boolean);
       const pattern = Math.round(num(c.pattern));
       const rand = seeded(num(c.seed) * 7919 + 13);
       // Every hit of every named sound, in time order, with the light it fires.
-      const hits: [number, number, number][] = []; // time, strength, light
-      groups.forEach((g, gi) => (ctx.music?.sound(g) ?? []).forEach(([t, s]) => hits.push([t, s, gi])));
+      const hits: [number, number, number, number][] = []; // time, strength, light, decay
+      groups.forEach((g, gi) => (ctx.music?.sound(g) ?? []).forEach(([t, s]) => hits.push([t, s, gi, num(c.decay)])));
       hits.sort((a, b) => a[0] - b[0]);
       const next = groups.map(() => 0);
       let walk = 0;
@@ -747,26 +757,42 @@ const defs: NodeDef[] = [
           const hi = h[2] === groups.length - 1 ? n : Math.min(n, lo + per);
           light = order[lo + (next[h[2]]++ % Math.max(1, hi - lo))];
         } else if (pattern === 2) {
-          do light = Math.floor(rand() * n);
+          do light = far[Math.floor(rand() * n)];
           while (n > 1 && light === last);
         } else light = order[walk++ % n];
         last = light;
         h[2] = light;
       }
-      return { pts, hits, attack: num(c.attack), decay: num(c.decay) };
+      if (n === 0) hits.length = 0;
+      // Big moments: drops (as sure as the analysis is) and phrase starts (softer), all near lights at once.
+      const kinds = String(c.moments).split("|").map((s) => s.trim());
+      const moments: [number, number][] = [];
+      const drops = ctx.music?.drops() ?? [];
+      if (kinds.includes("drops")) drops.forEach((d) => moments.push([d.t, d.confidence]));
+      if (kinds.includes("phrases")) {
+        const bar = ctx.music ? (60 / Math.max(1, ctx.music.a.tempo)) * 4 : 2;
+        for (const t of ctx.music?.a.phrases?.starts ?? []) {
+          if (t > 0.5 && !drops.some((d) => Math.abs(d.t - t) < bar)) moments.push([t, 0.6]);
+        }
+      }
+      for (const [t, s] of moments) for (const k of near) hits.push([t, s, k, num(c.nearDecay)]);
+      hits.sort((a, b) => a[0] - b[0]);
+      const longest = Math.max(num(c.decay), num(c.nearDecay));
+      return { pts, hits, attack: num(c.attack), longest };
     },
     eval: (i, ctx, state) => {
-      const s = state as { pts: [number, number, number, number][]; hits: [number, number, number][]; attack: number; decay: number };
+      const s = state as { pts: [number, number, number, number][]; hits: [number, number, number, number][]; attack: number; longest: number };
       const level = clamp(num(i.level), 0, 1);
       const lv = s.pts.map(() => 0);
       if (level > 0) {
         const ease = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
         let k = s.hits.length - 1;
         while (k >= 0 && s.hits[k][0] > ctx.t) k--;
-        for (; k >= 0 && ctx.t - s.hits[k][0] < s.attack + s.decay; k--) {
-          const [t0, strength, light] = s.hits[k];
+        for (; k >= 0 && ctx.t - s.hits[k][0] < s.attack + s.longest; k--) {
+          const [t0, strength, light, decay] = s.hits[k];
           const x = ctx.t - t0;
-          const env = x < s.attack ? ease(x / Math.max(s.attack, 1e-3)) : 1 - ease((x - s.attack) / s.decay);
+          if (x >= s.attack + decay) continue;
+          const env = x < s.attack ? ease(x / Math.max(s.attack, 1e-3)) : 1 - ease((x - s.attack) / decay);
           lv[light] = Math.max(lv[light], env * (0.6 + 0.4 * strength));
         }
       }

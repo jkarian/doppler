@@ -393,7 +393,9 @@ async function main() {
   // BroadcastChannel: it sends graph edits, this page sends back live node values.
   const graphRes = await fetch(`graphs/${graphName}.json`);
   if (!graphRes.ok) fail(`No graph graphs/${graphName}.json`);
-  const runtime = new GraphRuntime((await graphRes.json()) as Graph, { music, scene: { gapHorizon } });
+  // Real-world distance of a picture point, for nodes that treat near and far differently.
+  const depthFeet = (u: number, v: number) => depthAt(u, v) * (15840 / pct(0.95));
+  const runtime = new GraphRuntime((await graphRes.json()) as Graph, { music, scene: { gapHorizon, depthFeet } });
   const channel = new BroadcastChannel("doppler");
   channel.onmessage = (e: MessageEvent) => {
     const msg = e.data;
@@ -543,10 +545,12 @@ async function main() {
   const drawNookMarkers = () => {
     if (!nookPlacing) return void (nookMarkers.innerHTML = "");
     const feet = Number(nookNode()?.params?.radius ?? 800) || 800;
+    const nearFeet = Number(nookNode()?.params?.near ?? 8000);
     nookMarkers.innerHTML = nookPoints()
       .map(([u, v, r, b], i) => {
         const [x, y] = uvToScreen(u, v);
-        const ring = i === nookDrag || i === nookHover ? "#fff" : "#ffd27a";
+        // Near lights (kept for big moments) in blue, mid and far ones (on the sounds) in amber.
+        const ring = i === nookDrag || i === nookHover ? "#fff" : depthFeet(u, v) < nearFeet ? "#8fc8ff" : "#ffd27a";
         // The area of effect as it appears on screen: the pool's real radius at the light's distance.
         const px = ((feet / feetPerUnit) * r) / (depthAt(u, v) * tanHalfFov) * viewScale[1] * (innerHeight / 2);
         const tag = r !== 1 || b !== 1 ? `<div style="position:absolute;left:${x + 12}px;top:${y - 7}px;color:${ring};font-size:11px;white-space:nowrap;text-shadow:0 0 3px #000">area ${Math.round(r * 100)}% · bright ${Math.round(b * 100)}%</div>` : "";
