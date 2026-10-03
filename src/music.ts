@@ -39,9 +39,9 @@ export class Music {
 
   /**
    * Big moments that kick the sun up. Drop starts always push hard; otherwise a bar start pushes when
-   * the track is much louder than over the few seconds before it. After each push there's a cooldown,
-   * so a long loud stretch makes the sun pump rather than stay up. Fixed rules on the analysis:
-   * the same track always gives the same pushes.
+   * the low end (kick and bass) comes in much harder than over the few seconds before it. Overall
+   * loudness would also react to hats, snares and vocals. A long cooldown keeps the sun for big
+   * moments only. Fixed rules on the analysis: the same track always gives the same pushes.
    */
   private findPushes(): Push[] {
     const pushes: Push[] = [];
@@ -51,16 +51,16 @@ export class Music {
     for (const t of this.a.downbeats) {
       if (t < 4) continue; // the "before" window needs four seconds of track behind it
       let before = 0;
-      for (let k = 1; k <= 16; k++) before += this.loudness(t - k * 0.25);
+      for (let k = 1; k <= 16; k++) before += this.bass(t - k * 0.25);
       before /= 16;
-      const now = Math.max(this.loudness(t + 0.05), this.loudness(t + 0.15));
+      const now = Math.max(this.bass(t + 0.05), this.bass(t + 0.15));
       const sec = this.section(t);
-      const bonus = { drop: 0.35, build: 0.15 * sec.progress, normal: 0, quiet: 0 }[sec.kind];
-      const lift = ((now - before) * 5 + bonus) * (sec.kind === "quiet" ? 0.4 : 1);
-      if (lift > 0.35) candidates.push({ t, strength: Math.min(1.1, lift) });
+      const bonus = { drop: 0.15, build: 0.1 * sec.progress, normal: 0, quiet: 0 }[sec.kind];
+      const lift = ((now - before) * 4 + bonus) * (sec.kind === "quiet" ? 0.4 : 1);
+      if (lift > 0.5) candidates.push({ t, strength: Math.min(1.1, lift) });
     }
     candidates.sort((a, b) => a.t - b.t || b.strength - a.strength);
-    const cooldown = 3.5;
+    const cooldown = 8;
     for (const c of candidates) {
       const last = pushes.at(-1);
       if (last && c.t - last.t < cooldown) {

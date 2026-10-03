@@ -320,7 +320,9 @@ async function main() {
     const amp = a * gain * (0.5 + 0.5 * music.energy(t));
     const bar = music.bar(t);
     const tau = 2 * Math.PI;
-    const kick = a * 0.6 * music.beatPulse(t, 0.15) * (sec.kind === "drop" ? 1 : 0.4);
+    // One gentle push per bar in drops, nothing per beat: per-beat motion reads as jitter.
+    const sinceBar = (bar - Math.floor(bar)) * 4 * (60 / Math.max(music.a.tempo, 1));
+    const kick = sec.kind === "drop" ? a * 0.5 * Math.exp(-sinceBar / 0.6) : 0;
     const dropHit = a * 3 * Math.exp(-music.sinceDrop(t) / 0.8);
     return [
       amp * Math.sin((tau * bar) / 4),
@@ -360,14 +362,14 @@ async function main() {
   };
   const sunLook = (t: number): Look => {
     const pushes = music ? music.pushes.concat(manualPushes) : manualPushes;
-    const h = lift(pushes, t) + (music ? 0.04 * music.beatPulse(t, 0.2) : 0);
+    const h = lift(pushes, t);
     const rest = restArc(t);
     const arc = rest + (90 - rest) * h;
     const up = clamp(arc / 70, 0, 1); // 0 at the horizon, 1 high in the sky
     const above = clamp((arc + 6) / 10, 0, 1); // fades out as it sets
     const dawn: Vec3 = [1.0, 0.55, 0.3];
     const noon: Vec3 = [1.0, 0.95, 0.88];
-    const loud = music ? 0.6 + 0.4 * music.energy(t, 1) : 1;
+    const loud = music ? 0.6 + 0.4 * music.energy(t, 2) : 1; // slow: no per-beat flicker
     return {
       ...look,
       sunArc: arc,
