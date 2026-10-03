@@ -7,7 +7,7 @@ over the far rock behind it, and the strip it uncovers was never in the picture:
 across it and it shows as a dark seam. This builds a second layer (a "layered depth image"), only along
 those edges:
 
-    1. Depth edges: near rock in front of something much further away (at least 40% further).
+    1. Depth edges: near rock in front of something much further away (at least 10% further, like the renderer's silhouettes).
     2. The band behind each edge that the largest camera move can uncover. Its width follows the parallax
        between the near and far side: f * baseline * (1/near - 1/far), times a safety margin.
     3. Depth there: the far side's depth, carried in behind the edge.
@@ -44,13 +44,13 @@ def find_band(z: np.ndarray, sky: np.ndarray, tan_half_fov: float, aspect: float
     # Farthest depth around each pixel, out to the widest band we could need.
     reach = int(min(0.12 * w, f_px * baseline * margin * (1 / z[~sky].min()) + 4))
     Lfar = ndi.maximum_filter(L, size=2 * max(reach, 3) + 1)
-    # Near side of a big depth step: at least 40% further just next to it. Small steps inside the same rock
-    # mass (ledges, strata) move together with it and uncover almost nothing.
-    edge = (ndi.maximum_filter(L, size=5) - L) > np.log(1.4)
+    # Near side of a depth step the renderer treats as a silhouette (it tears squares spanning more than 8%;
+    # 10% here, a little margin). Every such edge needs a band, or it still opens a seam.
+    edge = (ndi.maximum_filter(L, size=5) - L) > np.log(1.1)
     edge = ndi.binary_opening(edge, iterations=1)
     dist = ndi.distance_transform_edt(~edge)
     need = f_px * baseline * margin * (1 / z - 1 / np.exp(Lfar))
-    band = (dist < need) & (L < Lfar - np.log(1.25)) & ~sky
+    band = (dist < np.maximum(need, 3)) & (L < Lfar - np.log(1.1)) & ~sky
     band = ndi.binary_closing(band, iterations=3) & ~sky
     # Background depth: the far side carried in, smoothed so the hidden surface is plausible, not blocky.
     Lbg = cv2.GaussianBlur(Lfar.astype(np.float32), (0, 0), max(2.0, reach / 6))
