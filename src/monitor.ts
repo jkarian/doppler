@@ -10,6 +10,7 @@
 
 import { mood, type Music, type SectionKind } from "./music.ts";
 import { NODE_TYPES, type Value } from "./graph/nodes.ts";
+import { inputHelp, nodeHelp } from "./graph/help.ts";
 import type { Graph, GraphNode, GraphRuntime } from "./graph/runtime.ts";
 
 export interface MonitorOptions {
@@ -39,18 +40,22 @@ const css = `
 #monitor .head .save { margin-left: auto; background: #ffd27a; color: #000; border: 0; border-radius: 3px; padding: 3px 12px; cursor: pointer; font-weight: 600; }
 #monitor .key { display: inline-flex; align-items: center; gap: 4px; }
 #monitor .key i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-#monitor .tl { grid-column: 1; grid-row: 2; position: relative; align-self: end; }
+#monitor .master { grid-column: 1 / -1; grid-row: 2; display: flex; gap: 18px; flex-wrap: wrap; }
+#monitor .master label { display: flex; align-items: center; gap: 6px; color: #aaa; }
+#monitor .master input { width: 140px; accent-color: #ffd27a; }
+#monitor .master output { color: #fff; min-width: 36px; font-variant-numeric: tabular-nums; }
+#monitor .tl { grid-column: 1; grid-row: 3; position: relative; align-self: end; }
 #monitor .tl canvas { width: 100%; display: block; cursor: pointer; }
 #monitor .tip { position: absolute; top: 0; pointer-events: none; background: rgba(0,0,0,0.85); padding: 3px 6px;
   border-radius: 3px; white-space: nowrap; font-size: 11px; transform: translateX(-50%); }
-#monitor .meters { grid-column: 2; grid-row: 2; display: flex; gap: 6px; align-items: flex-end; }
+#monitor .meters { grid-column: 2; grid-row: 3; display: flex; gap: 6px; align-items: flex-end; }
 #monitor .meter { width: 36px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 #monitor .bar { position: relative; width: 16px; height: 118px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
 #monitor .fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 3px 3px 0 0; }
 #monitor .peak { position: absolute; left: 0; right: 0; height: 2px; background: #fff; opacity: 0.7; }
 #monitor .meter span { font-size: 10px; color: #aaa; text-align: center; line-height: 1.1; }
 #monitor .sep { width: 1px; height: 130px; background: rgba(255,255,255,0.12); margin: 0 4px; }
-#monitor .setups { grid-column: 1 / -1; grid-row: 3; display: flex; flex-direction: column; gap: 4px; }
+#monitor .setups { grid-column: 1 / -1; grid-row: 4; display: flex; flex-direction: column; gap: 4px; }
 #monitor .setup { display: grid; grid-template-columns: 14px 190px 64px 1fr auto; gap: 10px; align-items: center;
   background: rgba(255,255,255,0.04); border-radius: 4px; padding: 5px 8px; }
 #monitor .setup.off { opacity: 0.55; }
@@ -71,8 +76,23 @@ const css = `
 #monitor .row label { color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #monitor .row output { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
 #monitor .row input { width: 100%; accent-color: #ffd27a; }
+#monitor [data-tip] { cursor: help; }
+#monitor .row label[data-tip]::after, #monitor .master span[data-tip]::after { content: " ?"; color: #666; font-size: 10px; }
+.monitor-tip { position: fixed; z-index: 10; max-width: 320px; padding: 7px 10px; border-radius: 5px; background: #1d1d20;
+  border: 1px solid rgba(255,255,255,0.18); color: #eee; font: 12px/1.4 system-ui, sans-serif; pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+.monitor-tip b { color: #ffd27a; }
 `;
 
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+const KIND_HELP: Record<string, string> = {
+  intro: "the quiet opening",
+  build: "the climb into a drop",
+  drop: "the big hits",
+  breakdown: "quiet stretches between drops",
+  normal: "everything else that's playing",
+  outro: "the ending",
+};
 const fmt = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const num = (v: Value | undefined, d = 0) => (typeof v === "number" ? v : Array.isArray(v) ? v[0] ?? d : d);
 
@@ -97,6 +117,21 @@ export function createMonitor(o: MonitorOptions) {
   document.head.append(Object.assign(document.createElement("style"), { textContent: css }));
   const root = Object.assign(document.createElement("div"), { id: "monitor", hidden: true });
   document.body.append(root);
+
+  // Pop-up explanations: hover anything with data-tip.
+  const tipBox = Object.assign(document.createElement("div"), { className: "monitor-tip", hidden: true });
+  document.body.append(tipBox);
+  root.addEventListener("mouseover", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-tip]");
+    if (!el || !el.dataset.tip) return void (tipBox.hidden = true);
+    tipBox.innerHTML = `<b>${esc(el.dataset.tipTitle ?? el.textContent ?? "")}</b><br>${esc(el.dataset.tip)}`;
+    tipBox.hidden = false;
+    const r = el.getBoundingClientRect();
+    const top = r.top - tipBox.offsetHeight - 6;
+    tipBox.style.left = `${Math.min(innerWidth - tipBox.offsetWidth - 8, Math.max(8, r.left))}px`;
+    tipBox.style.top = `${top > 8 ? top : r.bottom + 6}px`;
+  });
+  root.addEventListener("mouseleave", () => (tipBox.hidden = true));
 
   // --- Graph helpers ---------------------------------------------------------------------------
   const graph = () => runtime.graph;
@@ -147,6 +182,40 @@ export function createMonitor(o: MonitorOptions) {
   const status = head.querySelector<HTMLElement>(".status")!;
   head.querySelector<HTMLButtonElement>(".save")!.onclick = async () => (status.textContent = await o.save());
   root.append(head);
+
+  // Master sliders: the few settings you reach for most, always in view.
+  const MASTER: { type: string; param: string; label: string; min: number; max: number; step: number }[] = [
+    { type: "Sun", param: "gain", label: "sun", min: 0, max: 10, step: 0.05 },
+    { type: "Tone", param: "cap", label: "brightness cap", min: 0.2, max: 10, step: 0.05 },
+    { type: "NookLights", param: "intensity", label: "nook lights", min: 0, max: 20, step: 0.05 },
+    { type: "Sky", param: "brightness", label: "sky", min: 0, max: 20, step: 0.1 },
+    { type: "Sync", param: "lead", label: "visual lead ms", min: -200, max: 200, step: 1 },
+  ];
+  const master = document.createElement("div");
+  master.className = "master";
+  root.append(master);
+  const buildMaster = () => {
+    master.innerHTML = "";
+    for (const m of MASTER) {
+      const node = runtime.graph.nodes.find((n) => n.type === m.type);
+      if (!node || runtime.graph.wires.some((w) => w.to[0] === node.id && w.to[1] === m.param)) continue;
+      const def = NODE_TYPES[m.type].inputs.find((i) => i.name === m.param);
+      const value = () => num(node.params?.[m.param], (def?.default as number) ?? 0);
+      const row = document.createElement("label");
+      row.innerHTML = `<span data-tip="${esc(inputHelp(m.type, m.param))}">${m.label}</span><input type="range" min="${m.min}" max="${m.max}" step="${m.step}"><output></output>`;
+      const r = row.querySelector("input")!;
+      const out = row.querySelector("output")!;
+      r.value = String(value());
+      out.textContent = String(Math.round(value() * 100) / 100);
+      r.oninput = () => {
+        node.params = { ...(node.params ?? {}), [m.param]: Number(r.value) };
+        out.textContent = String(Math.round(Number(r.value) * 100) / 100);
+        runtime.load(runtime.graph);
+        o.edited(runtime.graph);
+      };
+      master.append(row);
+    }
+  };
 
   // --- Timeline --------------------------------------------------------------------------------
   const tl = document.createElement("div");
@@ -383,7 +452,7 @@ export function createMonitor(o: MonitorOptions) {
     const box = document.createElement("div");
     box.className = "node";
     const h = document.createElement("h4");
-    h.innerHTML = `<span>${node.name ?? node.type} <small>${sharedWith.length ? "also in " + sharedWith.join(", ") : ""}</small></span>`;
+    h.innerHTML = `<span data-tip="${esc(nodeHelp(node.type))}" data-tip-title="${esc(node.name ?? node.type)}">${node.name ?? node.type} <small>${sharedWith.length ? "also in " + sharedWith.join(", ") : ""}</small></span>`;
     const reset = Object.assign(document.createElement("button"), { textContent: "reset", title: "back to the node type's defaults" });
     h.append(reset);
     box.append(h);
@@ -395,7 +464,7 @@ export function createMonitor(o: MonitorOptions) {
       const max = inp.max ?? Math.max(1, Math.abs(v0) * 3);
       const row = document.createElement("div");
       row.className = "row";
-      row.innerHTML = `<label title="${inp.doc ?? inp.name}">${inp.name}</label><input type="range" min="${min}" max="${max}" step="${inp.step ?? 0.01}"><output></output>`;
+      row.innerHTML = `<label data-tip="${esc(inputHelp(node.type, inp.name))}">${inp.name}</label><input type="range" min="${min}" max="${max}" step="${inp.step ?? 0.01}"><output></output>`;
       const range = row.querySelector("input")!;
       const out = row.querySelector("output")!;
       const show = () => ((range.value = String(value())), (out.textContent = String(Math.round(value() * 1000) / 1000)));
@@ -439,7 +508,7 @@ export function createMonitor(o: MonitorOptions) {
         const active = num(p[k], 1) > 0.5;
         const chip = Object.assign(document.createElement("button"), { className: `chip${active ? " on" : ""}`, textContent: k });
         if (active) chip.style.background = MOOD_COLOR[mood(k)];
-        chip.title = `play in ${k} sections`;
+        chip.dataset.tip = `Click to ${active ? "stop" : "start"} playing this setup in ${k} sections (${KIND_HELP[k]}).`;
         chip.onclick = () => (setParam(s.node, k, active ? 0 : 1), changed(true), buildList());
         chips.append(chip);
       }
@@ -459,7 +528,7 @@ export function createMonitor(o: MonitorOptions) {
           const row2 = document.createElement("div");
           row2.className = "row";
           const value = () => num(s.node.params?.[name], inp.default as number);
-          row2.innerHTML = `<label title="${inp.doc ?? ""}">${name}</label><input type="range" min="${inp.min}" max="${inp.max}" step="${inp.step}"><output>${value()}</output>`;
+          row2.innerHTML = `<label data-tip="${esc(inputHelp("Setup", name))}">${name}</label><input type="range" min="${inp.min}" max="${inp.max}" step="${inp.step}"><output>${value()}</output>`;
           const r = row2.querySelector("input")!;
           r.value = String(value());
           r.oninput = () => (setParam(s.node, name, Number(r.value)), (row2.querySelector("output")!.textContent = r.value), changed());
@@ -483,6 +552,7 @@ export function createMonitor(o: MonitorOptions) {
   let built = false;
   let hudWasHidden = true;
   const rebuild = () => {
+    buildMaster();
     findSetups();
     sample();
     buildMeters();
@@ -509,6 +579,10 @@ export function createMonitor(o: MonitorOptions) {
     /** The graph was replaced from elsewhere (the editor). */
     graphChanged() {
       if (built) rebuild();
+    },
+    /** A message in the header (e.g. the graph changed on disk). */
+    setStatus(text: string) {
+      status.textContent = text;
     },
   };
 }

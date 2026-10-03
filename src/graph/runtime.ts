@@ -61,6 +61,11 @@ export class GraphRuntime {
     }
     for (const node of graph.nodes) {
       const def = NODE_TYPES[node.type];
+      if (this.byId.has(node.id)) {
+        // Two nodes with one id: wires can't tell them apart. Keep the first, flag the second.
+        this.errors.set(node.id, `two nodes share the id "${node.id}"`);
+        continue;
+      }
       if (!def) {
         this.errors.set(node.id, `unknown node type "${node.type}"`);
         continue;

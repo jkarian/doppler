@@ -406,12 +406,18 @@ async function main() {
   if (!graphRes.ok) fail(`No graph graphs/${graphName}.json`);
   // Real-world distance of a picture point, for nodes that treat near and far differently.
   const depthFeet = (u: number, v: number) => depthAt(u, v) * (15840 / pct(0.95));
-  const runtime = new GraphRuntime((await graphRes.json()) as Graph, { music, scene: { gapHorizon, depthFeet } });
+  let diskText = await graphRes.text();
+  const runtime = new GraphRuntime(JSON.parse(diskText) as Graph, { music, scene: { gapHorizon, depthFeet } });
+  // Unsaved edits made here (monitor, placement, keys) or in the editor. While there are none, a change
+  // to the graph file on disk (another window's Save, or an edit to the file) is picked up live; while
+  // there are, the monitor warns instead of overwriting them.
+  let graphDirty = false;
+  const markEdited = () => (graphDirty = true);
   visualLead = () => Number(runtime.graph.nodes.find((n) => n.type === "Sync")?.params?.lead ?? 0) / 1000;
   const channel = new BroadcastChannel("doppler");
   channel.onmessage = (e: MessageEvent) => {
     const msg = e.data;
-    if (msg?.type === "graph" && msg.from !== "display") runtime.load(msg.graph as Graph), monitor?.graphChanged();
+    if (msg?.type === "graph" && msg.from !== "display") runtime.load(msg.graph as Graph), monitor?.graphChanged(), markEdited();
     else if (msg?.type === "hello") channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display" });
   };
   const monitor = music
@@ -420,13 +426,27 @@ async function main() {
         runtime,
         time: () => time,
         seek: (t) => (audio.currentTime = Math.max(0, t - visualLead())),
-        edited: (graph) => channel.postMessage({ type: "graph", graph, name: graphName, from: "display", edit: true }),
+        edited: (graph) => (markEdited(), channel.postMessage({ type: "graph", graph, name: graphName, from: "display", edit: true })),
         save: async () => {
-          const res = await fetch(`/graph?name=${encodeURIComponent(graphName)}`, { method: "POST", body: JSON.stringify(runtime.graph, null, 1) });
+          const body = JSON.stringify(runtime.graph, null, 1);
+          const res = await fetch(`/graph?name=${encodeURIComponent(graphName)}`, { method: "POST", body });
+          if (res.ok) (diskText = body), (graphDirty = false);
           return res.ok ? `saved graphs/${graphName}.json` : `save failed: ${res.status}`;
         },
       })
     : null;
+  setInterval(async () => {
+    const res = await fetch(`graphs/${graphName}.json`, { cache: "no-store" }).catch(() => null);
+    if (!res?.ok) return;
+    const text = await res.text();
+    if (text === diskText) return;
+    if (text === JSON.stringify(runtime.graph, null, 1)) return void ((diskText = text), (graphDirty = false)); // saved from the editor
+    if (graphDirty) return monitor?.setStatus("the graph file changed on disk: Save keeps your edits here, reload (F5) takes the file's");
+    diskText = text;
+    runtime.load(JSON.parse(text) as Graph);
+    monitor?.graphChanged();
+    channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
+  }, 2000);
   let lastSent = 0;
   const sendValues = (now: number) => {
     if (now - lastSent < 66) return; // ~15 updates a second is plenty for the editor
@@ -550,6 +570,7 @@ async function main() {
     node.params = { ...node.params, [PARAM[m]]: pts.map((q) => fmtPoint(m, q)).join("; ") };
     runtime.load(runtime.graph);
     if (!final) return;
+    markEdited();
     channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
     monitor?.graphChanged();
   };
@@ -835,7 +856,8 @@ async function main() {
       if (!node) runtime.graph.nodes.push((node = { id: "sync", type: "Sync", name: "Sync (visual lead)", params: { lead: 0 }, pos: [40, 40] }));
       node.params = { ...node.params, lead: Math.round(Number(node.params?.lead ?? 0) + (key === "}" ? 1 : -1) * (e.altKey ? 1 : 10)) };
       runtime.load(runtime.graph);
-      channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
+      markEdited();
+    channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
       monitor?.graphChanged();
     }
   });

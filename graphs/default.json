@@ -223,9 +223,9 @@
    "params": {
     "azimuth": 7.62,
     "enabled": 1,
-    "maxArc": 60,
+    "maxArc": 34,
     "floorLight": 0,
-    "gain": 1.5
+    "gain": 3
    }
   },
   {
@@ -351,7 +351,7 @@
    "params": {
     "baseDim": 0.14,
     "baked": 0.1,
-    "cap": 1.4
+    "cap": 2.5
    }
   },
   {
@@ -759,13 +759,25 @@
    ]
   },
   {
-   "id": "sky",
+   "id": "skyLook",
    "type": "Sky",
    "name": "Sky",
    "params": {},
    "pos": [
     620,
     1116
+   ]
+  },
+  {
+   "id": "sync",
+   "type": "Sync",
+   "name": "Sync (visual lead)",
+   "params": {
+    "lead": 0
+   },
+   "pos": [
+    40,
+    40
    ]
   }
  ],
