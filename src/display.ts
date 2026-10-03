@@ -32,6 +32,7 @@ interface SceneInfo {
   far: number;
   fovDeg: number;
   haze?: { airlight: number[]; beta: number };
+  up?: number[]; // true vertical in scene space, from the flat ground (the photo's camera looks down a little)
 }
 
 interface Look {
@@ -583,13 +584,23 @@ async function main() {
     ];
   };
   const project3 = (p: Vec3): [number, number] => [(p[0] / (p[2] * tanHalfFov * aspect)) * 0.5 + 0.5, 0.5 - (p[1] / (p[2] * tanHalfFov)) * 0.5];
-  // A rig stands just in front of the rock at its spot, aimed by turn (0 = into the scene, + right) and tilt (up).
+  // Rigs aim by real-world angles: turn around true vertical (0 = into the scene, + right) and tilt up from
+  // level ground, so tilt 90 is straight up into the sky. The photo's camera looks down a little, so its own
+  // "up" leans into the scene; true vertical comes from the flat ground (scene.json "up").
+  const UP = normalize((info.up ?? [0, 1, 0]) as Vec3);
+  const FWD = normalize([-UP[0] * UP[2], -UP[1] * UP[2], 1 - UP[2] * UP[2]] as Vec3); // into the scene, level
+  const RIGHT = cross(UP, FWD);
+  const worldDir = (turnRad: number, tiltRad: number): Vec3 => {
+    const h = Math.cos(tiltRad);
+    return [0, 1, 2].map((j) => RIGHT[j] * Math.sin(turnRad) * h + UP[j] * Math.sin(tiltRad) + FWD[j] * Math.cos(turnRad) * h) as Vec3;
+  };
+  // A rig stands just in front of the rock at its spot.
   const rigOrigin = (u: number, v: number) => viewPos(u, v, depthAt(u, v) * 0.985);
   const rigAim = (q: number[]) => {
     const o = rigOrigin(q[0], q[1]);
     const az = q[2] * rad;
     const el = q[3] * rad;
-    const d: Vec3 = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    const d = worldDir(az, el);
     // How far out to draw the cone: a good way out, but not past the rock the beam would hit.
     return { o, d, len: Math.min(beamLength(o, d, info.far * 1.5), o[2] * 0.5) };
   };
@@ -604,7 +615,7 @@ async function main() {
     const out: { a: number; x: number; y: number }[] = [];
     for (let k = 0; k <= 96; k++) {
       const ang = -Math.PI + (2 * Math.PI * k) / 96;
-      const dir: Vec3 = which === "turn" ? [Math.sin(ang), 0, Math.cos(ang)] : [Math.sin(az) * Math.cos(ang), Math.sin(ang), Math.cos(az) * Math.cos(ang)];
+      const dir = which === "turn" ? worldDir(ang, 0) : worldDir(az, ang);
       const pnt: Vec3 = [o[0] + dir[0] * R, o[1] + dir[1] * R, o[2] + dir[2] * R];
       if (pnt[2] > 0.01) {
         const [x, y] = uvToScreen(...project3(pnt));

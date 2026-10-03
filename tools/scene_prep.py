@@ -18,7 +18,8 @@ Outputs, in --out (default: next to the image), all at the working size:
     normals_raw.npy   cached Marigold normals (--redo-normals to recompute).
     normal.png        view-space normals, standard tangent-space colours: x right, y up, z toward the camera
                       (a surface facing the camera is (128, 128, 255)).
-    scene.json        sizes and camera settings shared with the app.
+    scene.json        sizes and camera settings shared with the app, including "up": true vertical measured
+                      from the flat ground (the photo's camera is rarely level).
 
 Depth is fused from three models:
     Depth Anything V2   shape and surface detail (relative depth)
@@ -404,6 +405,25 @@ def marigold_normals(img: Image.Image, model_id: str, res: int, tile: int, steps
     return n / (np.linalg.norm(n, axis=-1, keepdims=True) + 1e-12)
 
 
+def estimate_up(normal_png: Path, z: np.ndarray, sky: np.ndarray) -> list[float]:
+    """True vertical in scene space (x right, y up, z into the scene), from the flat ground in the picture:
+    canyon floors and plateau tops are level in reality, so their average normal is "up". A camera looking
+    down tilts it toward the camera (negative z). Only ground beyond the median distance counts: the floor
+    right around the camera (a cave, a ledge) is often not level."""
+    n = np.asarray(Image.open(normal_png).convert("RGB")).astype(np.float32) / 127.5 - 1
+    n[..., 2] *= -1  # standard colours have z toward the camera
+    land = ~sky
+    flat = land & (n[..., 1] > 0.75) & (z > np.median(z[land]))
+    if flat.sum() < 1000:
+        return [0.0, 1.0, 0.0]
+    up = n[flat].mean(0)
+    # Keep only the pitch: sloping plateaus skew the sideways part, and photos are nearly always level
+    # side to side.
+    up[0] = 0
+    up /= np.linalg.norm(up)
+    return [round(float(c), 4) for c in up]
+
+
 def save_normals(n: np.ndarray, sky: np.ndarray, path: Path) -> None:
     # Standard colours: flip z so a surface facing the camera is blue (128, 128, 255).
     std = np.stack([n[..., 0], n[..., 1], -n[..., 2]], axis=-1)
@@ -506,6 +526,8 @@ def main() -> None:
     else:
         n = compute_normals(z, tan_half_fov, args.relief)
     save_normals(n, sky, out_dir / "normal.png")
+    up = estimate_up(out_dir / "normal.png", z, sky)
+    print(f"  up (from flat ground): {up}, camera pitch {np.degrees(np.arctan2(-up[2], up[1])):+.1f} deg (+ = looking down)")
     z.astype("<f4").tofile(out_dir / "depth.bin")
 
     # Haze: estimated from depth, removed before delighting (the renderer adds it back to lit areas).
@@ -544,6 +566,7 @@ def main() -> None:
                 "far": round(far, 4),
                 "fovDeg": round(float(fov), 2),
                 "relief": args.relief,
+                "up": up,
                 "haze": haze,
             },
             indent=2,
