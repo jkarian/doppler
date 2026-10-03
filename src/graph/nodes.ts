@@ -41,6 +41,7 @@ export interface SkyLaserOut {
   sheetWidth: number; // degrees wide, for curtains
   fade: number; // brightness falls with the trigger's phase: exp(-phase * fade)
   width: number;
+  glow: number;
   color: number[];
   intensity: number;
   hit: number;
@@ -55,7 +56,8 @@ export interface LaserOut {
   roll: number; // degrees: tilts the fan's plane around the aim (0 = fan spreads sideways)
   spread: number; // degrees across the fan
   count: number; // beams
-  width: number; // beam thickness, degrees as seen from the camera
+  width: number; // beam thickness, degrees as seen from the middle distance
+  glow: number; // how far the glow reaches, in beam widths
   color: number[];
   intensity: number;
   sheet: number; // 0..1: fill between the beams with a plane of light
@@ -439,6 +441,7 @@ const defs: NodeDef[] = [
       { name: "spread", default: 40, min: 0, max: 180, step: 0.5 },
       { name: "count", default: 7, min: 1, max: 24, step: 1 },
       { name: "width", default: 0.08, min: 0.005, max: 2, step: 0.005 },
+      { name: "glow", default: 12, min: 1, max: 80, step: 0.5, doc: "how far the glow reaches, in beam widths" },
       { name: "color", default: [0.1, 1, 0.25] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
       { name: "sheet", default: 0, min: 0, max: 1, step: 0.05 },
@@ -450,7 +453,7 @@ const defs: NodeDef[] = [
       (ctx.out.lasers ??= []).push({
         originU: num(i.originU), originV: num(i.originV), originDepth: Math.max(0, num(i.originDepth)),
         azimuth: num(i.azimuth), elevation: num(i.elevation), roll: num(i.roll), spread: clamp(num(i.spread), 0, 180),
-        count: Math.round(clamp(num(i.count), 1, 24)), width: Math.max(0.005, num(i.width)), color: vec(i.color),
+        count: Math.round(clamp(num(i.count), 1, 24)), width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), color: vec(i.color),
         intensity: num(i.intensity), sheet: clamp(num(i.sheet), 0, 1), hit: Math.max(0, num(i.hit)),
       });
       return {};
@@ -477,6 +480,7 @@ const defs: NodeDef[] = [
       { name: "sheetWidth", default: 6, min: 0.5, max: 60, step: 0.5 },
       { name: "fade", default: 2, min: 0, max: 20, step: 0.1 },
       { name: "width", default: 0.07, min: 0.005, max: 2, step: 0.005 },
+      { name: "glow", default: 12, min: 1, max: 80, step: 0.5, doc: "how far the glow reaches, in beam widths" },
       { name: "color", default: [0.2, 0.6, 1] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
       { name: "hit", default: 1.5, min: 0, step: 0.05 },
@@ -488,7 +492,7 @@ const defs: NodeDef[] = [
         count: Math.round(clamp(num(i.count), 1, 24)), trigger: num(i.trigger), seed: num(i.seed),
         uMin: num(i.uMin), uMax: num(i.uMax), vMin: num(i.vMin), vMax: num(i.vMax), minDepth: Math.max(0, num(i.minDepth)), tilt: Math.max(0, num(i.tilt)),
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
-        width: Math.max(0.005, num(i.width)), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
+        width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
       });
       return {};
     },

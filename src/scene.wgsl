@@ -126,7 +126,7 @@ struct Laser {
   right: vec3f, halfSpread: f32,   // radians
   normal: vec3f, intensity: f32,   // normal of the fan's plane
   color: vec3f, width: f32,        // width: beam thickness in scene units (thins with distance)
-  hit: f32, maxLen: f32, pad0: f32, pad1: f32,
+  hit: f32, maxLen: f32, glow: f32, pad1: f32,   // glow: how far the glow reaches, in beam widths
 };
 struct Lasers {
   count: u32, pad0: u32, pad1: u32, pad2: u32,
@@ -154,6 +154,13 @@ struct LaserLight {
   air: vec3f,
   rock: vec3f,
 };
+
+// Glow across a beam, x = 0 at its centre to 1 at the edge of the glow: a flat hot core, a rounded
+// shoulder, a quick drop to about half, then a long slow tail into the haze.
+fn glowProfile(x: f32) -> f32 {
+  let past = max(0.0, x - 0.08);
+  return exp(-pow(past / 0.3, 1.3));
+}
 
 // Laser and scan light fade with distance across the vista: full at the cave mouth, 30% at the far end
 // of the land, spread evenly in log distance (gentler than real life, so far rock still lights up).
@@ -221,7 +228,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         }
       }
       // A sheet reads as a plane: its individual beams fade back.
-      g += (exp(-pow(ang / drawAng, 2.0)) + 0.1 * exp(-ang / (drawAng * 6.0))) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t);
+      g += glowProfile(ang / (drawAng * L.glow)) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
