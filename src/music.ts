@@ -149,29 +149,60 @@ export class Music {
  * A spurt starts from wherever the sun is. Precomputed, so any time can be evaluated directly.
  */
 export class SunMotion {
-  static readonly JUMP = 0.6;
-  static readonly HOLD = 0.6;
+  static readonly JUMP = 1.2;
+  static readonly HOLD = 1.0;
   static readonly MAX = 75;
   private readonly t: number[] = [];
   private readonly from: number[] = [];
   private readonly to: number[] = [];
 
+  // The sun itself follows the eased target like a heavy mass on a critically damped spring:
+  // no abrupt starts, stops or reversals. Simulated once at RATE Hz; lift() interpolates.
+  static readonly RATE = 60;
+  static readonly OMEGA = 2.2; // lower = heavier
+  private readonly samples: Float32Array;
+
   constructor(spurts: Spurt[]) {
     for (const s of [...spurts].sort((a, b) => a.t - b.t)) {
-      const level = this.lift(s.t);
+      const level = this.target(s.t);
       this.t.push(s.t);
       this.from.push(level);
       // Diminishing kicks: the higher it already is, the less a spurt adds.
       this.to.push(Math.min(SunMotion.MAX, level + s.deg * (1 - level / SunMotion.MAX) ** 1.5));
     }
+    const end = (this.t.at(-1) ?? 0) + 30;
+    const n = Math.ceil(end * SunMotion.RATE) + 1;
+    this.samples = new Float32Array(n);
+    const dt = 1 / SunMotion.RATE;
+    const w = SunMotion.OMEGA;
+    let x = 0;
+    let v = 0;
+    for (let k = 0; k < n; k++) {
+      this.samples[k] = x;
+      // Semi-implicit Euler, a few substeps for stability.
+      for (let sub = 0; sub < 4; sub++) {
+        const h = dt / 4;
+        v += (w * w * (this.target(k * dt) - x) - 2 * w * v) * h;
+        x += v * h;
+      }
+    }
+  }
+
+  lift(t: number): number {
+    const x = t * SunMotion.RATE;
+    if (x <= 0) return 0;
+    const k = Math.floor(x);
+    if (k >= this.samples.length - 1) return 0;
+    return this.samples[k] + (this.samples[k + 1] - this.samples[k]) * (x - k);
   }
 
   /** Seconds to come back down from a given height. */
   private static returnTime(peak: number): number {
-    return 3 + peak / 12;
+    return 5 + peak / 8;
   }
 
-  lift(t: number): number {
+  /** Where the spurts are pulling the sun: eased up, hold, long S back down. */
+  private target(t: number): number {
     const i = upperBound(this.t, t) - 1;
     if (i < 0) return 0;
     const x = t - this.t[i];
