@@ -722,7 +722,7 @@ const defs: NodeDef[] = [
       "area, shift+scroll for brightness). Lights further than near feet (mid and far ground) are fired by the sounds " +
       "(names separated by |): pattern 0 walks through them in order, 1 sends the first sound to the left half and the second " +
       "to the right, 2 is seeded random. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
-      "by |): all of them come on together and fade over nearDecay. Up to 8 show at once, the brightest 3 with shadows.",
+      "by |): all of them come on together and fade over nearDecay. Up to 16 show at once, the brightest 7 with shadows.",
     inputs: [
       { name: "positions", default: "0.5,0.7", kind: "const" },
       { name: "sounds", default: "tick|tock", kind: "const" },

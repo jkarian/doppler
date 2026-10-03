@@ -199,13 +199,20 @@ async function main() {
     });
   const shadowA = shadowTexture();
   const shadowB = shadowTexture();
+  // Nook lights 4-7's shadows: marched alongside (second target), blurred the same way.
+  const shadowA2 = shadowTexture();
+  const shadowB2 = shadowTexture();
   const fullscreen = (entryPoint: string, constants?: Record<string, number>) =>
     device.createRenderPipeline({
       layout: "auto",
       vertex: { module, entryPoint: "vs_full" },
       fragment: { module, entryPoint, constants, targets: [{ format: "rgba16float" }] },
     });
-  const shadowPipeline = fullscreen("fs_shadow");
+  const shadowPipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module, entryPoint: "vs_full" },
+    fragment: { module, entryPoint: "fs_shadow", targets: [{ format: "rgba16float" }, { format: "rgba16float" }] },
+  });
   const raysPipeline = fullscreen("fs_rays");
   const raysTex = shadowTexture();
   const blurH = fullscreen("fs_blur", { HORIZONTAL: 1 });
@@ -221,8 +228,8 @@ async function main() {
   const laserData = new Float32Array(LASER_FLOATS);
   const laserCount = new Uint32Array(laserData.buffer, 0, 1);
   const laserBuf = device.createBuffer({ size: LASER_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  // Nook lights: count + 8 lights x 8 floats. Layout matches `Nooks` in scene.wgsl.
-  const NOOK_FLOATS = 4 + 8 * 8;
+  // Nook lights: count + 16 lights x 8 floats. Layout matches `Nooks` in scene.wgsl.
+  const NOOK_FLOATS = 4 + 16 * 8;
   const nookData = new Float32Array(NOOK_FLOATS);
   const nookCount = new Uint32Array(nookData.buffer, 0, 1);
   const nookBuf = device.createBuffer({ size: NOOK_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -244,6 +251,7 @@ async function main() {
       { binding: 7, resource: raysTex.createView() },
       { binding: 8, resource: { buffer: laserBuf } },
       { binding: 9, resource: { buffer: nookBuf } },
+      { binding: 10, resource: shadowA2.createView() },
     ],
   });
   const raysBind = device.createBindGroup({
@@ -274,6 +282,8 @@ async function main() {
     });
   const blurHBind = blurBind(blurH, shadowA);
   const blurVBind = blurBind(blurV, shadowB);
+  const blurHBind2 = blurBind(blurH, shadowA2);
+  const blurVBind2 = blurBind(blurV, shadowB2);
 
   // --- Scene geometry on the CPU (for picking) ------------------------------
   const depthAt = (u: number, v: number) => {
@@ -832,11 +842,19 @@ async function main() {
     writeNooks(graphOut.nooks);
 
     const enc = device.createCommandEncoder();
-    // march -> A, blur A -> B (horizontal), blur B -> A (vertical); the main pass reads A.
+    // march -> A (and A2), blur A -> B (horizontal), blur B -> A (vertical), same for A2; the main pass reads A and A2.
+    const march = enc.beginRenderPass({
+      colorAttachments: [shadowA, shadowA2].map((t) => ({ view: t.createView(), loadOp: "clear" as const, storeOp: "store" as const, clearValue: [1, 1, 1, 1] })),
+    });
+    march.setPipeline(shadowPipeline);
+    march.setBindGroup(0, shadowBind);
+    march.draw(3);
+    march.end();
     for (const [pipe, bind, target] of [
-      [shadowPipeline, shadowBind, shadowA],
       [blurH, blurHBind, shadowB],
       [blurV, blurVBind, shadowA],
+      [blurH, blurHBind2, shadowB2],
+      [blurV, blurVBind2, shadowA2],
       [raysPipeline, raysBind, raysTex],
     ] as const) {
       const sp = enc.beginRenderPass({ colorAttachments: [{ view: target.createView(), loadOp: "clear", storeOp: "store", clearValue: [1, 0, 0, 0] }] });
@@ -1050,13 +1068,13 @@ async function main() {
   };
 
   // Nook lights: each sits a little in front of the rock at its picture position (toward the camera, so
-  // it's in the nook's open air). Pools have a real size (feet), so far ones look smaller. Up to 8 render,
-  // brightest first; the first 3 get shadows.
+  // it's in the nook's open air). Pools have a real size (feet), so far ones look smaller. Up to 16 render,
+  // brightest first; the first 7 get shadows.
   // Placement mode (N) shows them all.
   const writeNooks = (N: RenderOut["nooks"]) => {
     nookData.fill(0);
     const all = (N?.lights ?? []).map((l) => (placing === "nooks" ? { ...l, level: 0.6 } : l));
-    const lit = all.filter((l) => l.level > 0.002).sort((a, b) => b.level - a.level).slice(0, 8);
+    const lit = all.filter((l) => l.level > 0.002).sort((a, b) => b.level * b.b - a.level * a.b).slice(0, 16);
     lit.forEach((l, i) => {
       const z = depthAt(l.u, l.v);
       const radius = (N!.radius / feetPerUnit) * l.r;

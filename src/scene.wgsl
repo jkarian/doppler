@@ -125,9 +125,9 @@ fn lightAt(p: vec3f) -> LightHit {
 @group(0) @binding(6) var shadowTex: texture_2d<f32>;  // half-res light visibility, in image space (see fs_shadow)
 @group(0) @binding(7) var raysTex: texture_2d<f32>;    // half-res sun shafts, in image space (see fs_rays)
 
-// Nook lights: up to 8 small lights tucked into the rock, each washing a pool of light over the walls
-// around it. The display sorts them brightest first; the first 3 get shadows (rock jutting out between
-// the light and a wall cuts the pool off), carried in the shadow texture's g, b, a.
+// Nook lights: up to 16 small lights tucked into the rock, each washing a pool of light over the walls
+// around it. The display sorts them brightest first; the first 7 get shadows (rock jutting out between
+// the light and a wall cuts the pool off): 3 in the shadow texture's g, b, a, 4 more in a second texture.
 struct Nook {
   pos: vec3f,
   radius: f32,   // the pool's reach, scene units: light falls to nothing there
@@ -139,9 +139,11 @@ struct Nooks {
   pad0: u32,
   pad1: u32,
   pad2: u32,
-  l: array<Nook, 8>,
+  l: array<Nook, 16>,
 };
 @group(0) @binding(9) var<storage, read> nooks: Nooks;
+@group(0) @binding(10) var shadowTex2: texture_2d<f32>;  // nook lights 4-7's visibility (see fs_shadow)
+const NOOK_SHADOWS = 7u;
 
 // Bright at the light, easing to nothing at the radius.
 fn nookFall(d: f32, r: f32) -> f32 {
@@ -417,21 +419,29 @@ fn shadowSize() -> vec2f {
   return ceil(u.imgSize * 0.5);
 }
 
+struct ShadowOut {
+  @location(0) a: vec4f,  // r: sun or spotlight, g b a: nook lights 1-3
+  @location(1) b: vec4f,  // nook lights 4-7
+};
+
 @fragment
-fn fs_shadow(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+fn fs_shadow(@builtin(position) frag: vec4f) -> ShadowOut {
   let uv = frag.xy / shadowSize();
   let z = depthNearest(uv);
-  if (u.shadows < 0.5 || z >= u.far * u.skyCut) { return vec4f(1.0); }
+  var out = ShadowOut(vec4f(1.0), vec4f(1.0));
+  if (u.shadows < 0.5 || z >= u.far * u.skyCut) { return out; }
   let p = viewPos(uv, z);
-  var vis = vec4f(1.0);
   let hit = lightAt(p);
-  if (hit.amount > 0.0) { vis.x = shadowAt(p, hit.l, hit.dist, frag.xy, u.sun > 0.5); }  // outside the beam: nothing to shadow
-  for (var i = 0u; i < min(nooks.count, 3u); i++) {
+  if (hit.amount > 0.0) { out.a.x = shadowAt(p, hit.l, hit.dist, frag.xy, u.sun > 0.5); }  // outside the beam: nothing to shadow
+  for (var i = 0u; i < min(nooks.count, NOOK_SHADOWS); i++) {
     let toL = nooks.l[i].pos - p;
     let d = length(toL);
-    if (d < nooks.l[i].radius && d > 1e-4) { vis[i + 1u] = shadowAt(p, toL / d, d, frag.xy, false); }
+    if (d < nooks.l[i].radius && d > 1e-4) {
+      let sh = shadowAt(p, toL / d, d, frag.xy, false);
+      if (i < 3u) { out.a[i + 1u] = sh; } else { out.b[i - 3u] = sh; }
+    }
   }
-  return vis;
+  return out;
 }
 
 // Sun shafts: light scattered by the air toward the camera, wherever the line from a pixel toward the
@@ -553,15 +563,17 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   // Slight wrap so rough AI-derived normals don't go hard black at the terminator.
   let ndl = clamp((dot(n, hit.l) + 0.15) / 1.15, 0.0, 1.0);
   var vis = select(textureSampleLevel(shadowTex, samp, uv, 0.0), vec4f(1.0), u.shadows < 0.5);
+  var vis2 = select(textureSampleLevel(shadowTex2, samp, uv, 0.0), vec4f(1.0), u.shadows < 0.5);
   let shadow = vis.r;
   let haze = exp(-u.hazeBeta * z);
   var nook = vec3f(0.0);
-  for (var i = 0u; i < min(nooks.count, 8u); i++) {
+  for (var i = 0u; i < min(nooks.count, 16u); i++) {
     let toL = nooks.l[i].pos - p;
     let d = length(toL);
     if (d < nooks.l[i].radius) {
       let nl = clamp((dot(n, toL / max(d, 1e-4)) + 0.15) / 1.15, 0.0, 1.0);
-      let sh = select(1.0, vis[min(i, 2u) + 1u], i < 3u);
+      var sh = 1.0;
+      if (i < 3u) { sh = vis[i + 1u]; } else if (i < NOOK_SHADOWS) { sh = vis2[i - 3u]; }
       nook += nooks.l[i].color * (nookFall(d, nooks.l[i].radius) * nl * sh);
     }
   }
