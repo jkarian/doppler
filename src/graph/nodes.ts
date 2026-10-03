@@ -62,7 +62,19 @@ export interface LaserOut {
   hit: number; // how brightly beams and sheets mark the rock they strike
 }
 
+/** MRI-style scan: a stack of parallel slices sweeping through the scene, lighting the rock where they cut it. */
+export interface ScanOut {
+  axis: number; // 0 depth (log distance from the camera), 1 height, 2 sideways
+  position: number; // 0..1 across the scene's range on that axis
+  lines: number; // slices in the stack: the front one plus trailing ones, fading
+  spacing: number; // between slices, as a fraction of the range
+  thickness: number;
+  color: number[];
+  intensity: number;
+}
+
 export interface RenderOut {
+  scan?: ScanOut;
   lasers?: LaserOut[];
   skyLasers?: SkyLaserOut[];
   sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number };
@@ -478,6 +490,32 @@ const defs: NodeDef[] = [
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
         width: Math.max(0.005, num(i.width)), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
       });
+      return {};
+    },
+  },
+  {
+    type: "Scan",
+    category: "Output",
+    doc:
+      "MRI-style scan: a stack of parallel slices sweeping through the scene, lighting the rock where each slice cuts it. " +
+      "axis 0: depth (contours of equal distance, near to far), 1: height, 2: sideways. position 0..1 across the scene " +
+      "(wire a Bar count through fract() for a sweep locked to the music).",
+    inputs: [
+      { name: "axis", default: 0, kind: "const", min: 0, max: 2, step: 1 },
+      { name: "position", default: 0.5, min: 0, max: 1, step: 0.005 },
+      { name: "lines", default: 6, kind: "const", min: 1, max: 32, step: 1 },
+      { name: "spacing", default: 0.035, min: 0.001, max: 0.5, step: 0.001 },
+      { name: "thickness", default: 1, min: 0.1, max: 10, step: 0.05 },
+      { name: "color", default: [0.4, 0.9, 1] },
+      { name: "intensity", default: 1, min: 0, step: 0.05 },
+    ],
+    outputs: [],
+    eval: (i, ctx) => {
+      if (num(i.intensity) <= 0) return {};
+      ctx.out.scan = {
+        axis: Math.round(clamp(num(i.axis), 0, 2)), position: num(i.position), lines: Math.round(clamp(num(i.lines), 1, 32)),
+        spacing: Math.max(0.001, num(i.spacing)), thickness: Math.max(0.1, num(i.thickness)), color: vec(i.color), intensity: num(i.intensity),
+      };
       return {};
     },
   },

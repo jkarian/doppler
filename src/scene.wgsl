@@ -34,7 +34,31 @@ struct Uniforms {
   flare: f32,          // lens flare strength (already scaled by how much of the sun is visible)
   sunScreen: vec2f,    // the sun's position on screen, ndc
   skyBoost: f32,       // extra sky glow, pumping with the kick
+  pad0: f32,
+  scan: vec4f,         // MRI scan: axis (0 depth, 1 height, 2 sideways), front position, spacing, thickness (in axis units)
+  scanColor: vec4f,    // rgb, intensity
+  scanLines: vec4f,    // number of slices, -, -, -
 };
+
+// MRI-style scan: slices of constant depth (log distance), height or sideways position, sweeping
+// through the scene. Each slice lights a thin line where it cuts the rock; trailing slices fade.
+fn scanLight(p: vec3f) -> vec3f {
+  let axis = i32(u.scan.x + 0.5);
+  var c = log(max(p.z, 1e-3));
+  if (axis == 1) { c = p.y; }
+  if (axis == 2) { c = p.x; }
+  // Keep lines about the same width on screen: thickness scales with distance (already log for depth).
+  var thick = u.scan.w;
+  if (axis != 0) { thick = u.scan.w * (0.004 * p.z + 0.002); }
+  var g = 0.0;
+  let n = i32(u.scanLines.x + 0.5);
+  for (var k = 0; k < n; k++) {
+    let d = c - (u.scan.y - f32(k) * u.scan.z);
+    let fade = 1.0 - f32(k) / f32(n);
+    g += exp(-pow(d / thick, 2.0)) * fade * fade;
+  }
+  return u.scanColor.rgb * (u.scanColor.a * g);
+}
 
 // Lens flare, in screen space: a glow and starburst at the sun, and coloured ghosts along the line
 // from the sun through the screen centre, the way reflections inside a camera lens line up.
@@ -160,7 +184,7 @@ fn laserLight(p: vec3f, sky: bool) -> vec3f {
           let rel = cam + tp * v - o;
           let a = atan2(dot(rel, side), dot(rel, d));
           if (abs(a) <= db.w && length(rel) < b.w / max(cos(a), 0.2)) {
-            g += 0.05 * min(6.0, 1.0 / max(abs(vn), 0.03));
+            g += 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)); // faint haze: the contour lines carry it
           }
         }
         if (!sky) {
@@ -437,6 +461,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   let air = smoothstep(u.far * 0.02, u.far * 0.12, z);
   color += u.lightColor * (u.rays * air * textureSampleLevel(raysTex, samp, uv, 0.0).r);
   if (u.flare > 0.0) { color += lensFlare(frag.xy) * u.lightColor; }
+  if (u.scanColor.a > 0.0 && !sky) { color += scanLight(p); }
   if (lasers.count > 0u) { color += laserLight(select(p, viewPos(uv, u.far * 4.0), sky), sky); }
 
   // Brightness cap on luminance, keeping hue, so stacked lights roll off instead of clipping to white.

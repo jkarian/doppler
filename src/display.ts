@@ -211,7 +211,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 44;
+  const UNIFORM_FLOATS = 56;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
   const LASER_FLOATS = 4 + 4 * 24 + 192 * 4;
   const laserData = new Float32Array(LASER_FLOATS);
@@ -596,6 +596,7 @@ async function main() {
       grid[0], grid[1], info.haze?.beta ?? 0, look.baked,
       look.sun ? 1 : 0, look.rays, caveDepth, 0,
       ...sunScreen(look), look.sun ? skyBoost : 0, 0,
+      ...scanUniforms(graphOut.scan),
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
@@ -624,6 +625,34 @@ async function main() {
     pass.draw(grid[0] * grid[1] * 6);
     pass.end();
     device.queue.submit([enc.finish()]);
+  };
+
+  // Scan: map the node's 0..1 position and spacing onto the land's range on its axis
+  // (log distance for depth, so the sweep moves evenly from the cave mouth to the mountains).
+  const landRange = (() => {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (let y = 0; y < H; y += 8) {
+      for (let x = 0; x < W; x += 8) {
+        const z = depth[y * W + x];
+        if (z >= info.far * 0.98) continue;
+        const pnt = viewPos((x + 0.5) / W, (y + 0.5) / H, z);
+        const c = [Math.log(Math.max(z, 1e-3)), pnt[1], pnt[0]];
+        for (let i = 0; i < 3; i++) {
+          lo[i] = Math.min(lo[i], c[i]);
+          hi[i] = Math.max(hi[i], c[i]);
+        }
+      }
+    }
+    return { lo, hi };
+  })();
+  const scanUniforms = (s: RenderOut["scan"]): number[] => {
+    if (!s) return new Array(12).fill(0);
+    const span = landRange.hi[s.axis] - landRange.lo[s.axis];
+    const front = landRange.lo[s.axis] + span * s.position;
+    // Thickness: for depth it's in log units (constant on screen), otherwise it's scaled in the shader.
+    const thick = s.axis === 0 ? 0.006 * s.thickness : s.thickness;
+    return [s.axis, front, s.spacing * span, thick, ...(s.color as Vec3), s.intensity, s.lines, 0, 0, 0];
   };
 
   // Lasers: origin, fan basis, and each beam's length to the first rock it hits (marched through the

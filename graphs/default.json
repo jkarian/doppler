@@ -371,65 +371,6 @@
    }
   },
   {
-   "id": "fanSweep",
-   "type": "Oscillator",
-   "pos": [
-    1300,
-    20
-   ],
-   "name": "Fan sweep: 1 cycle / 8 bars",
-   "params": {
-    "cycles": 0.125,
-    "amplitude": 35,
-    "offset": 180
-   }
-  },
-  {
-   "id": "fanLevel",
-   "type": "Expression",
-   "pos": [
-    1300,
-    230
-   ],
-   "name": "Fan brightness",
-   "params": {
-    "expr": "1.2 * a * (0.5 + 0.5 * b)"
-   }
-  },
-  {
-   "id": "fanColor",
-   "type": "Color",
-   "pos": [
-    1300,
-    400
-   ],
-   "name": "Laser green",
-   "params": {
-    "r": 0.1,
-    "g": 1,
-    "b": 0.25
-   }
-  },
-  {
-   "id": "laserFan",
-   "type": "Laser",
-   "pos": [
-    1630,
-    20
-   ],
-   "name": "Pinnacle fan",
-   "params": {
-    "originU": 0.555,
-    "originV": 0.47,
-    "originDepth": 0,
-    "elevation": 18,
-    "spread": 50,
-    "count": 9,
-    "width": 0.06,
-    "hit": 1.5
-   }
-  },
-  {
    "id": "sheetHeight",
    "type": "Expression",
    "pos": [
@@ -574,6 +515,45 @@
     "fade": 0.8,
     "width": 0.05,
     "hit": 1.5
+   }
+  },
+  {
+   "id": "scanSweep",
+   "type": "Expression",
+   "pos": [
+    1300,
+    1700
+   ],
+   "name": "Scan sweep: every 2 bars",
+   "params": {
+    "expr": "fract(a / 2)"
+   }
+  },
+  {
+   "id": "scanLevel",
+   "type": "Expression",
+   "pos": [
+    1300,
+    1830
+   ],
+   "name": "Scan: drops only",
+   "params": {
+    "expr": "2.5 * a * (0.7 + 0.3 * b)"
+   }
+  },
+  {
+   "id": "scan",
+   "type": "Scan",
+   "pos": [
+    1630,
+    1700
+   ],
+   "name": "MRI scan",
+   "params": {
+    "axis": 0,
+    "lines": 8,
+    "spacing": 0.03,
+    "thickness": 1
    }
   }
  ],
@@ -1074,66 +1054,6 @@
     "count"
    ],
    "to": [
-    "fanSweep",
-    "phase"
-   ]
-  },
-  {
-   "from": [
-    "gate",
-    "value"
-   ],
-   "to": [
-    "fanLevel",
-    "a"
-   ]
-  },
-  {
-   "from": [
-    "pump",
-    "value"
-   ],
-   "to": [
-    "fanLevel",
-    "b"
-   ]
-  },
-  {
-   "from": [
-    "fanSweep",
-    "value"
-   ],
-   "to": [
-    "laserFan",
-    "azimuth"
-   ]
-  },
-  {
-   "from": [
-    "fanLevel",
-    "value"
-   ],
-   "to": [
-    "laserFan",
-    "intensity"
-   ]
-  },
-  {
-   "from": [
-    "fanColor",
-    "color"
-   ],
-   "to": [
-    "laserFan",
-    "color"
-   ]
-  },
-  {
-   "from": [
-    "bar",
-    "count"
-   ],
-   "to": [
     "sheetHeight",
     "a"
    ]
@@ -1266,6 +1186,56 @@
    "to": [
     "skyCurtains",
     "color"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "scanSweep",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "isDrop",
+    "value"
+   ],
+   "to": [
+    "scanLevel",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "scanLevel",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "scanSweep",
+    "value"
+   ],
+   "to": [
+    "scan",
+    "position"
+   ]
+  },
+  {
+   "from": [
+    "scanLevel",
+    "value"
+   ],
+   "to": [
+    "scan",
+    "intensity"
    ]
   }
  ]
