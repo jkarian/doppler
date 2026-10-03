@@ -151,3 +151,43 @@ Suggested scenes:
 - A laser tunnel along the canyon floor, chasing in time with the hats.
 - Clouds drifting over the rim, casting moving shadows, thickening in quiet sections.
 - One scene of your own choosing that you couldn't build in any tool today.
+
+## Archetype scenes
+
+Doppler's nodes and workflow are being reverse-engineered from three archetype scenes, each built for real:
+
+1. **Image to world** (doppler-canyon): one image becomes a 2.5D scene, lit by music-driven setups.
+2. **Particles**: simulation, state over time, very large counts on the GPU.
+3. **Straight 3D**: real geometry and procedural generation (idea: a car driving on a procedural road).
+
+What all three need is the core; what only one needs is a library.
+
+## Lessons for Doppler
+
+From archetype 1, the canyon (October 2026):
+
+- **Setups are the unit people think in.** Not nodes: "the nook lights", "the ground rigs", "the sun". Each is
+  switched on and off by the song (Setup node: section kinds, fades) and has its own handful of settings.
+- **Separate what, how and when.** Setup = the objects (what); pattern = how they animate (chase, alternate
+  sides, hit); arrangement = which pattern plays on which setup in which part of the song (when). Patterns
+  should work on any setup.
+- **Objects need hands-on placement, with the right handles.** Clicking a point on the picture places a
+  light; rigs need Maya-style rotate rings (turn and tilt), not abstract numbers. Each kind of object
+  needs its own direct-manipulation mode, shown on the picture, with numbers as readouts.
+- **Elements need attributes.** Each light has its own area and brightness; each rig its own aim and cone.
+  This points to a Houdini-style point/attribute model with groups and per-element rules.
+- **People hear instruments, not frequencies.** Name sounds by example ("this is the tick") and drive things
+  from them. Stems give instrument groups; naming gives the instruments.
+- **Song structure is the timeline.** Sections, drops, phrases and tension drive everything; people tune
+  against a visual of the whole track (the monitor), not a list of numbers.
+- **Every setting needs a plain explanation on hover.** Unexplained knobs (floorLight) stall people.
+- **A few master sliders matter most.** Sun strength, brightness cap, audio sync. Keep them always in view.
+- **Real-world units and frames.** Feet for sizes, true vertical for angles (a photo's camera is never
+  level), real degrees for the sun. Picture-relative numbers confuse.
+- **Physical plausibility reads as quality.** Shadows with hard edges, light that stays off the floor when
+  it should, beams stopped by rock, cave rock that blocks a low sun.
+- **Audio/visual sync is per setup of screens and speakers.** A TV needed 135 ms; it must be easy to set.
+- **The pipeline must be automatic.** Image in, scene out; every guess estimated, with a slider to correct
+  it by eye. Manual 3D steps dilute the value.
+- **Show, don't describe.** Iterating by eye with frames and short clips, and sketches drawn on screenshots,
+  is how decisions get made. The tool should make both easy.
