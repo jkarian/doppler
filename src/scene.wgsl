@@ -56,11 +56,13 @@ fn scanLight(p: vec3f) -> f32 {
   let n = i32(u.scanLines.x + 0.5);
   for (var k = 0; k < n; k++) {
     let d = c - (u.scan.y - f32(k) * u.scanLines.y);
-    let core = exp(-pow(d / thick, 2.0));
-    // Behind the moving line: a gentle trail that falls off.
-    let behind = select(0.0, 0.75 * exp(d / trail), d < 0.0);
+    // Same core/glow relationship as a laser beam: a solid hard-edged core, and behind the moving
+    // line a trail that starts at half the core and falls off (quick drop, long faint tail).
+    let core = 1.0 - smoothstep(thick * 0.45, thick * 0.55, abs(d));
+    let y = max(0.0, -d - thick * 0.5) / trail;
+    let behind = select(0.0, 0.5 * (0.75 * exp(-y / 0.04) + 0.25 * exp(-y / 0.25)), d < 0.0);
     let fade = 1.0 - f32(k) / f32(n);
-    g += max(core, behind) * fade * fade;
+    g += (core + (1.0 - core) * behind) * fade * fade;
   }
   return u.scanColor.a * g * reachFade(dist, u.scanLines.z);
 }
