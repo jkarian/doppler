@@ -225,7 +225,7 @@
     "enabled": 1,
     "maxArc": 29,
     "floorLight": 0,
-    "gain": 3,
+    "gain": 10,
     "bounce": 0.5,
     "shadowDepth": 0.3,
     "shadowSoftness": 0.1
@@ -354,7 +354,7 @@
    "params": {
     "baseDim": 0.14,
     "baked": 0.1,
-    "cap": 2.5
+    "cap": 4.85
    }
   },
   {
@@ -765,7 +765,9 @@
    "id": "skyLook",
    "type": "Sky",
    "name": "Sky",
-   "params": {},
+   "params": {
+    "brightness": 5.9
+   },
    "pos": [
     620,
     1116
@@ -776,7 +778,7 @@
    "type": "Sync",
    "name": "Sync (visual lead)",
    "params": {
-    "lead": 0
+    "lead": 6
    },
    "pos": [
     40,
