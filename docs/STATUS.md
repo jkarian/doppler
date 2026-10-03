@@ -88,8 +88,8 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 
 ## Known issues
 
-- Dark slivers behind rock edges when the camera moves (single-layer depth). Real fix: inpainted background
-  layer, or camera-mapped geometry from Maya (the user can do this).
+- Dark slivers behind rock edges when the camera moves (single-layer depth). Fix in progress: the automatic
+  background layer (tools/background_layer.py).
 - Far canyon depth is smooth/approximate; contour and scan lines get blobby there (hence `reach`). The
   distant-mountain mask leaks a strip down the canyon centre; trim it when depth is next touched.
 - Bliss (first track) loses its first drop's sun with the intensity-based gate, and has no reliable beat grid
@@ -109,6 +109,13 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
   HTDemucs stems -> Beat This! grid -> All-In-One/SongFormer boundaries voted onto an 8-bar phrase grid ->
   our own stem-based drop/build labels -> tension, energy and anticipation curves. Bliss needs a no-grid mode.
 - Test scripts, outputs and Windows workarounds for both are kept locally in `captures/research/`.
+
+## Guiding principle
+
+Image in, living scene out, automatically. Manual 3D work (Maya) dilutes the value and is out of the plan.
+Every scene guess (depth, normals, pitch, background, shadow thickness) is estimated automatically, with a
+slider to correct by eye. Goal: one command from image to scene. The user's own work is taste (placing and
+tuning), ideally starting from automatic suggestions (lights in nooks, rigs on ledges).
 
 ## Plan (agreed 2026-10-03)
 
@@ -149,5 +156,5 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 3. Background inpainting layer (fixes edge slivers, allows bigger camera moves).
 4. Particles and glow (milestone 3), moving clouds and cloud shadows, more laser types (tunnels/cones,
    chasers), raise the 4-fixture laser limit.
-5. Maya camera-map pipeline (layered depth/normal EXRs or full geometry) when the user wants it.
+5. One command, image to scene: scene_prep + MoGe + background layer + up estimate, good defaults.
 6. Possible port to Rust + wgpu: shaders and graph files carry over; runtime and editor need rewriting.
