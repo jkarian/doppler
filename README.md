@@ -1,4 +1,4 @@
-# Doppler
+# Doppler Canyon
 
 Landscape music visualizer. See the v1 brief for scope. Currently at milestone 1 (look test).
 

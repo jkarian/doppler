@@ -1,4 +1,4 @@
-# Doppler: status and handoff
+# Doppler Canyon: status and handoff
 
 Last updated 2026-10-03. Read this first when picking the project back up.
 
@@ -9,6 +9,12 @@ by a music-driven sun, sun shafts, lens flare, lasers and an MRI-style scan. Sho
 from the user's desktop RTX 4090. The original brief (`landscape-music-visualizer-brief.docx`, not in the
 repo) asked for TypeScript + WebGPU in the browser; the user later asked for everything to become procedural
 nodes, built "while eating our lunch", with a possible move to native Rust + wgpu later.
+
+## Name
+
+Repo renamed from `doppler` to `doppler-canyon` (github.com/jkarian/doppler-canyon) on 2026-10-03. The name
+"Doppler" is reserved for the planned plain-language node tool ([brief](brief-plain-language-nodes.md)); this
+visualizer is meant to become its first scene. The local folder is still `D:\Projects\doppler`.
 
 ## Running it
 
@@ -77,6 +83,8 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 - Test scripts, outputs and Windows workarounds for both are kept locally in `captures/research/`.
 
 ## Backlog / ideas
+
+0. The plain-language node brief has a paper exercise for the user to do before any code.
 
 1. Head tracking: webcam face/eye tracking (e.g. MediaPipe in the browser) moving the camera for real
    parallax as the viewer moves. Would be a Head node feeding Camera.
