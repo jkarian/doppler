@@ -696,6 +696,37 @@ async function main() {
     }
     return maxLen;
   };
+  // Ground rigs: fixed spots on the rock (seeded by the node's seed only, so they never move), each
+  // firing a beam in a seeded random direction that changes per trigger step and drifts in between.
+  // Aims that run into the rock right away are re-rolled. A negative sheet field marks the beam's
+  // start as a visible rig for the shader.
+  const groundRigs = (S: NonNullable<RenderOut["skyLasers"]>[number], li: number, step: number, maxLen: number) => {
+    for (let bi = 0; bi < S.count; bi++) {
+      const place = seeded(S.seed * 7919 + bi * 31);
+      let u = 0.5;
+      let v = 0.8;
+      for (let tries = 0; tries < 60; tries++) {
+        u = S.uMin + (S.uMax - S.uMin) * place();
+        v = S.vMin + (S.vMax - S.vMin) * place();
+        const z = depthAt(u, v);
+        if (z < info.far * 0.9 && z >= S.minDepth) break;
+      }
+      const o = viewPos(u, v, depthAt(u, v) * 0.985); // just in front of the rock
+      const aimRand = seeded(S.seed * 104729 + step * 131 + bi * 17);
+      const phase = 2 * Math.PI * (S.driftSpeed * S.t) + bi * 1.7;
+      let d: Vec3 = [0, 1, 0];
+      let len = 0;
+      for (let tries = 0; tries < 8; tries++) {
+        const az = 2 * Math.PI * aimRand() + S.drift * rad * Math.sin(phase);
+        const el = (S.elevMin + (S.elevMax - S.elevMin) * aimRand()) * rad + S.drift * rad * 0.5 * Math.sin(phase * 0.7 + 1.1);
+        d = normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
+        if (d[2] < -0.2 && tries < 7) continue; // don't fire back at the camera: up close it's a smear
+        len = beamLength(o, d, maxLen);
+        if (len > o[2] * 0.4) break; // clear of the rock it stands on
+      }
+      laserData.set([...o, len, ...d, -1], beamSlot(li, bi));
+    }
+  };
   const beamSlot = (li: number, bi: number) => 4 + 4 * 24 + (li * 24 + bi) * 8;
   const writeLasers = (list: NonNullable<RenderOut["lasers"]>, sky: NonNullable<RenderOut["skyLasers"]>) => {
     laserData.fill(0);
@@ -734,6 +765,10 @@ async function main() {
       const brightness = S.intensity * Math.exp(-(S.trigger - step) * S.fade);
       const height = info.far * 0.6;
       laserData.set([0, 0, 0, S.count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
+      if (S.from === 1) {
+        groundRigs(S, li, step, maxLen);
+        continue;
+      }
       for (let bi = 0; bi < S.count; bi++) {
         const rand = seeded(S.seed * 100003 + step * 101 + bi);
         let u = 0.5;

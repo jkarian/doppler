@@ -138,7 +138,7 @@ struct Laser {
 struct Lasers {
   count: u32, pad0: u32, pad1: u32, pad2: u32,
   l: array<Laser, 4>,
-  beams: array<vec4f, 192>,        // (laser * 24 + beam) * 2: [origin, length], [direction, sheet half-angle]
+  beams: array<vec4f, 192>,        // (laser * 24 + beam) * 2: [origin, length], [direction, curtain half-angle or -1 = ground rig]
 };
 @group(0) @binding(8) var<storage, read> lasers: Lasers;
 
@@ -252,6 +252,14 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       // white they'd merge into one soft band.
       // Beams in the air don't depend on the depth map, so `reach` doesn't cut them; they only dim with distance.
       g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t);
+      // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
+      if (db.w < 0.0) {
+        let to = dot(o - cam, v);
+        if (to > 0.0 && to < viewLen * 1.02) {
+          let angO = length(cross(v, o - cam)) / max(to, 0.05);
+          g += 2.0 * exp(-pow(angO / (drawAng * 2.5), 2.0)) * distanceFade(to);
+        }
+      }
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;

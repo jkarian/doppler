@@ -436,9 +436,9 @@
     1300,
     1050
    ],
-   "name": "Every beat",
+   "name": "Re-aim every 2 bars",
    "params": {
-    "expr": "a"
+    "expr": "a / 2"
    }
   },
   {
@@ -474,15 +474,24 @@
     1630,
     1050
    ],
-   "name": "Sky beams",
+   "name": "Ground laser rigs",
    "params": {
-    "count": 4,
-    "seed": 1,
-    "tilt": 10,
-    "fade": 2.5,
+    "from": 1,
+    "count": 8,
+    "seed": 3,
+    "uMin": 0.3,
+    "uMax": 0.72,
+    "vMin": 0.35,
+    "vMax": 0.95,
+    "minDepth": 1.5,
+    "elevMin": 12,
+    "elevMax": 70,
+    "fade": 0,
+    "drift": 4,
+    "driftSpeed": 0.15,
     "width": 0.03,
-    "hit": 2,
-    "glow": 6
+    "glow": 6,
+    "hit": 2
    }
   },
   {
@@ -565,6 +574,51 @@
     960
    ],
    "name": "Beats"
+  },
+  {
+   "id": "godLevel",
+   "type": "Expression",
+   "pos": [
+    1300,
+    2000
+   ],
+   "name": "God lasers: drops only",
+   "params": {
+    "expr": "1.6 * a * (0.6 + 0.4 * b)"
+   }
+  },
+  {
+   "id": "godColor",
+   "type": "Color",
+   "pos": [
+    1300,
+    2130
+   ],
+   "name": "God light",
+   "params": {
+    "r": 0.8,
+    "g": 0.9,
+    "b": 1
+   }
+  },
+  {
+   "id": "godLasers",
+   "type": "SkyLaser",
+   "pos": [
+    1630,
+    2000
+   ],
+   "name": "God lasers (sky)",
+   "params": {
+    "from": 0,
+    "count": 4,
+    "seed": 11,
+    "tilt": 8,
+    "fade": 1.5,
+    "width": 0.03,
+    "glow": 6,
+    "hit": 2
+   }
   }
  ],
  "wires": [
@@ -1240,12 +1294,62 @@
   },
   {
    "from": [
-    "beat",
+    "bar",
     "count"
    ],
    "to": [
     "skyStep",
     "a"
+   ]
+  },
+  {
+   "from": [
+    "isDrop",
+    "value"
+   ],
+   "to": [
+    "godLevel",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "godLevel",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "beat",
+    "count"
+   ],
+   "to": [
+    "godLasers",
+    "trigger"
+   ]
+  },
+  {
+   "from": [
+    "godLevel",
+    "value"
+   ],
+   "to": [
+    "godLasers",
+    "intensity"
+   ]
+  },
+  {
+   "from": [
+    "godColor",
+    "color"
+   ],
+   "to": [
+    "godLasers",
+    "color"
    ]
   }
  ]

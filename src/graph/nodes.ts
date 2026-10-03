@@ -26,8 +26,14 @@ export interface SceneConsts {
 }
 
 /** What the output nodes produce for the renderer. Anything left out keeps the display's own setting. */
-/** Lasers from the sky: count beams (or vertical sheets) coming straight down onto random spots on the rock. */
+/**
+ * Scattered lasers: from the sky, count beams (or vertical sheets) come straight down onto random spots on
+ * the rock; from the ground, count fixed rigs on the rock each fire a beam in a random direction.
+ */
 export interface SkyLaserOut {
+  from: number; // 0: from the sky, 1: from rigs on the ground
+  elevMin: number; // ground: aim elevation range, degrees
+  elevMax: number;
   count: number;
   trigger: number; // new random spots each time floor(trigger) changes (wire a Beat or Bar count)
   seed: number;
@@ -471,10 +477,14 @@ const defs: NodeDef[] = [
     type: "SkyLaser",
     category: "Output",
     doc:
-      "Lasers from the sky: count straight beams coming down onto random spots on the rock inside an area of the picture. " +
-      "New spots each time floor(trigger) changes (wire a Beat or Bar count); the same track always picks the same spots. " +
-      "sheet 1 makes them vertical curtains of light. Shares the 4-fixture limit with Laser.",
+      "Scattered lasers. from 0 (sky): count straight beams come down onto random spots on the rock, new spots each " +
+      "time floor(trigger) changes; sheet 1 makes them vertical curtains. from 1 (ground): count laser rigs sit at fixed " +
+      "random spots on the rock and each fires a beam in a random direction (elevation elevMin-elevMax), re-aimed each " +
+      "trigger step. The same track always gives the same choices. Shares the 4-fixture limit with Laser.",
     inputs: [
+      { name: "from", default: 0, kind: "const", min: 0, max: 1, step: 1, doc: "0 sky, 1 ground rigs" },
+      { name: "elevMin", default: 15, min: -30, max: 89, step: 1, doc: "ground: lowest aim, degrees up" },
+      { name: "elevMax", default: 75, min: -30, max: 89, step: 1, doc: "ground: highest aim" },
       { name: "trigger", default: 0, step: 1 },
       { name: "count", default: 4, min: 1, max: 24, step: 1 },
       { name: "seed", default: 1, kind: "const", step: 1 },
@@ -500,6 +510,7 @@ const defs: NodeDef[] = [
     eval: (i, ctx) => {
       if (num(i.intensity) <= 0) return {};
       (ctx.out.skyLasers ??= []).push({
+        from: num(i.from) > 0.5 ? 1 : 0, elevMin: num(i.elevMin), elevMax: Math.max(num(i.elevMin), num(i.elevMax)),
         count: Math.round(clamp(num(i.count), 1, 24)), trigger: num(i.trigger), seed: num(i.seed),
         uMin: num(i.uMin), uMax: num(i.uMax), vMin: num(i.vMin), vMax: num(i.vMax), minDepth: Math.max(0, num(i.minDepth)), tilt: Math.max(0, num(i.tilt)),
         drift: Math.max(0, num(i.drift)), driftSpeed: Math.max(0, num(i.driftSpeed)), t: ctx.t,
