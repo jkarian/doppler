@@ -12,7 +12,7 @@
 //   space play/pause   J L seek 5 s   { } audio/video offset (10 ms; alt: 1 ms)   A auto light on/off
 //   S shadows   V cycle debug view   H show values   P save 1080p frame (shift: 4K)   C copy values   R reset   F full screen
 
-import { Music, lift, seeded, type Analysis, type Push } from "./music.ts";
+import { Music, SunMotion, seeded, type Analysis, type Spurt } from "./music.ts";
 
 type Vec3 = [number, number, number];
 
@@ -348,9 +348,11 @@ async function main() {
     }
     return look.target;
   };
-  // The sun on its arc. Rest level follows the section (eased over 2 s); pushes lift it elastically.
-  // U pushes it by hand, to try the feel without music.
-  const manualPushes: Push[] = [];
+  // The sun on its arc. Rest level follows the section (eased over 2 s); spurts kick it up and it crawls
+  // back. U kicks it by hand, to try the feel without music.
+  const musicSpurts: Spurt[] = music ? music.findSpurts() : [];
+  const manualSpurts: Spurt[] = [];
+  let sunMotion = new SunMotion(musicSpurts);
   const restArc = (t: number) => {
     if (!music) return look.sunElevation;
     let sum = 0;
@@ -361,27 +363,28 @@ async function main() {
     return sum / 8;
   };
   const sunLook = (t: number): Look => {
-    const pushes = music ? music.pushes.concat(manualPushes) : manualPushes;
-    const h = lift(pushes, t);
-    const rest = restArc(t);
-    const arc = rest + (90 - rest) * h;
+    const lifted = sunMotion.lift(t);
+    const h = lifted / 60; // 0 at rest, ~1 a long way up
+    const arc = restArc(t) + lifted;
     const up = clamp(arc / 70, 0, 1); // 0 at the horizon, 1 high in the sky
     const above = clamp((arc + 6) / 10, 0, 1); // fades out as it sets
     const dawn: Vec3 = [1.0, 0.55, 0.3];
     const noon: Vec3 = [1.0, 0.95, 0.88];
-    const loud = music ? 0.6 + 0.4 * music.energy(t, 2) : 1; // slow: no per-beat flicker
+    const loud = music ? 0.6 + 0.4 * music.energy(t, 2) : 1;
+    // Flicker from the hats and shakers: quick dips, like light through moving cloud.
+    const flicker = music ? 1 - 0.35 * music.flicker(t) : 1;
     return {
       ...look,
       sunArc: arc,
       color: dawn.map((c, i) => c + (noon[i] - c) * up) as Vec3,
-      intensity: look.intensity * above * (0.8 + 0.8 * Math.min(1, Math.max(0, h))) * loud,
+      intensity: look.intensity * above * (0.8 + 0.8 * Math.min(1, Math.max(0, h))) * loud * flicker,
       // Shafts are a low-sun thing: strongest at dawn, fading as it climbs.
       rays: look.rays * above * (1 - 0.7 * up) * loud,
     };
   };
 
   const animatedLook = (t: number): Look => {
-    if (look.sun && (music || manualPushes.length)) return sunLook(t);
+    if (look.sun && (music || manualSpurts.length)) return sunLook(t);
     if (!music || !autoLight) return look;
     const bar = music.bar(t);
     const i = Math.floor(bar);
@@ -515,7 +518,10 @@ async function main() {
     else if (key === "o") (cam.cover = !cam.cover), updateView();
     else if (key === "b") benchmark();
     else if (key === "t") look.sun = !look.sun;
-    else if (key === "u") manualPushes.push({ t: time, strength: e.shiftKey ? 1.3 : 0.9 });
+    else if (key === "u") {
+      manualSpurts.push({ t: time, deg: e.shiftKey ? 40 : 20 });
+      sunMotion = new SunMotion(musicSpurts.concat(manualSpurts));
+    }
     else if (key === "5") look.rays = clamp(look.rays / 1.25, 0, 5);
     else if (key === "6") look.rays = clamp(look.rays * 1.25 || 0.05, 0, 5);
     else if (key === "7") look.baked = clamp(look.baked - 0.05, 0, 1);

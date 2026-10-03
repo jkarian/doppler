@@ -9,6 +9,7 @@ export interface Analysis {
   loudness: { rate: number; values: number[] };
   bass: { rate: number; values: number[] };
   sections: { start: number; end: number; kind: SectionKind }[];
+  hats?: [number, number][]; // high-frequency hits: [time, strength]
 }
 
 export type SectionKind = "quiet" | "build" | "drop" | "normal";
@@ -20,57 +21,66 @@ export interface Section {
   progress: number; // 0..1 through the section
 }
 
-/** A kick to the sun: at time t, with strength (1 = up to overhead). */
-export interface Push {
+/** A kick to the sun: at time t, jump up by deg degrees along its arc. */
+export interface Spurt {
   t: number;
-  strength: number;
+  deg: number;
 }
 
 export class Music {
   readonly a: Analysis;
-  readonly pushes: Push[];
   private readonly period: number;
 
   constructor(analysis: Analysis) {
     this.a = analysis;
     this.period = 60 / Math.max(analysis.tempo, 1);
-    this.pushes = this.findPushes();
+
   }
 
   /**
-   * Big moments that kick the sun up. Drop starts always push hard; otherwise a bar start pushes when
-   * the low end (kick and bass) comes in much harder than over the few seconds before it. Overall
-   * loudness would also react to hats, snares and vocals. A long cooldown keeps the sun for big
-   * moments only. Fixed rules on the analysis: the same track always gives the same pushes.
+   * Spurts for the sun: on a bar start where the kick and bass hit hard, a jump of 10-30 degrees
+   * scaled by how intense the music is; drops jump 35-45. At least MIN_GAP seconds apart (drops
+   * excepted), so there's time to see it crawl back. The amount is "random" from a fixed seed per bar,
+   * so the same track always moves the sun the same way.
    */
-  private findPushes(): Push[] {
-    const pushes: Push[] = [];
+  findSpurts(): Spurt[] {
+    const MIN_GAP = 6;
     const drops = this.a.sections.filter((s) => s.kind === "drop").map((s) => s.start);
-    const DROP = 1.3;
-    const candidates: Push[] = drops.map((t) => ({ t, strength: DROP }));
-    for (const t of this.a.downbeats) {
-      if (t < 4) continue; // the "before" window needs four seconds of track behind it
-      let before = 0;
-      for (let k = 1; k <= 16; k++) before += this.bass(t - k * 0.25);
-      before /= 16;
-      const now = Math.max(this.bass(t + 0.05), this.bass(t + 0.15));
+    // Drops always get a big spurt.
+    const candidates: (Spurt & { drop: boolean })[] = drops.map((t, i) => ({ t, deg: 35 + 10 * seeded(9000 + i)(), drop: true }));
+    for (const [i, t] of this.a.downbeats.entries()) {
+      const hit = this.bass(t + 0.05) - Math.min(this.bass(t - 0.15), this.bass(t - 0.3));
       const sec = this.section(t);
-      const bonus = { drop: 0.15, build: 0.1 * sec.progress, normal: 0, quiet: 0 }[sec.kind];
-      const lift = ((now - before) * 4 + bonus) * (sec.kind === "quiet" ? 0.4 : 1);
-      if (lift > 0.5) candidates.push({ t, strength: Math.min(1.1, lift) });
+      if (sec.kind === "quiet" || !(hit > 0.05 || (sec.kind === "drop" && this.bass(t + 0.05) > 0.6))) continue;
+      const intensity = 0.4 + 0.6 * this.energy(t, 1);
+      candidates.push({ t, deg: (10 + 20 * seeded(5000 + i)()) * intensity, drop: false });
     }
-    candidates.sort((a, b) => a.t - b.t || b.strength - a.strength);
-    const cooldown = 8;
+    candidates.sort((a, b) => a.t - b.t);
+    const spurts: Spurt[] = [];
+    let last = -Infinity;
     for (const c of candidates) {
-      const last = pushes.at(-1);
-      if (last && c.t - last.t < cooldown) {
-        // A drop always gets its push: it replaces a weaker push that came shortly before.
-        if (c.strength >= DROP && last.strength < DROP) pushes[pushes.length - 1] = c;
-        continue;
-      }
-      pushes.push(c);
+      // Bar spurts keep their distance from the last spurt and leave room before a drop.
+      if (!c.drop && (c.t - last < MIN_GAP || drops.some((d) => d > c.t && d - c.t < 2))) continue;
+      spurts.push({ t: c.t, deg: c.deg });
+      last = c.t;
     }
-    return pushes;
+    return spurts;
+  }
+
+  /** Flicker from high-frequency hits: 0 = none, up to ~1 right on a strong hit, gone within ~0.2 s. */
+  flicker(t: number): number {
+    const hats = this.a.hats;
+    if (!hats?.length) return 0;
+    let lo = 0;
+    let hi = hats.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (hats[mid][0] <= t) lo = mid + 1;
+      else hi = mid;
+    }
+    let f = 0;
+    for (let i = lo - 1; i >= 0 && t - hats[i][0] < 0.25; i--) f = Math.max(f, hats[i][1] * Math.exp(-(t - hats[i][0]) / 0.05));
+    return f;
   }
 
   /** Fractional position along a sorted list of event times, extrapolated at the track tempo outside it. */
@@ -132,27 +142,52 @@ export class Music {
 }
 
 /**
- * Elastic response to pushes: how far the sun is lifted above its rest level (0 = rest, 1 = overhead).
- * Each push holds a target up for HOLD seconds; the sun follows it like a mass on a damped spring.
- * It starts from rest with zero speed (inertia), takes about a second and a half to climb, overshoots
- * a little, and on the way back dips slightly below rest before settling. The spring is linear, so
- * overlapping pushes simply add.
+ * The sun's lift above its resting height, in degrees along its arc, from a list of spurts.
+ * Each spurt eases it up (an S-curve over JUMP seconds: accelerates out of where it was, settles in
+ * at the top), it holds for HOLD seconds, then returns to rest along a long S-curve: slow to leave
+ * the top, quicker in the middle, gently into rest. Higher lifts take longer to come down.
+ * A spurt starts from wherever the sun is. Precomputed, so any time can be evaluated directly.
  */
-export function lift(pushes: Push[], t: number): number {
-  const HOLD = 2.0; // seconds the push holds the target up
-  const OMEGA = 2.2; // natural frequency (rad/s): lower = heavier, slower
-  const ZETA = 0.6; // damping: 1 = no overshoot, lower = more bounce
-  const wd = OMEGA * Math.sqrt(1 - ZETA * ZETA);
-  const step = (x: number) =>
-    x <= 0 ? 0 : 1 - Math.exp(-ZETA * OMEGA * x) * (Math.cos(wd * x) + (ZETA / Math.sqrt(1 - ZETA * ZETA)) * Math.sin(wd * x));
-  let sum = 0;
-  for (const p of pushes) {
-    const x = t - p.t;
-    if (x < 0 || x > HOLD + 8) continue;
-    sum += p.strength * (step(x) - step(x - HOLD));
+export class SunMotion {
+  static readonly JUMP = 0.6;
+  static readonly HOLD = 0.6;
+  static readonly MAX = 75;
+  private readonly t: number[] = [];
+  private readonly from: number[] = [];
+  private readonly to: number[] = [];
+
+  constructor(spurts: Spurt[]) {
+    for (const s of [...spurts].sort((a, b) => a.t - b.t)) {
+      const level = this.lift(s.t);
+      this.t.push(s.t);
+      this.from.push(level);
+      // Diminishing kicks: the higher it already is, the less a spurt adds.
+      this.to.push(Math.min(SunMotion.MAX, level + s.deg * (1 - level / SunMotion.MAX) ** 1.5));
+    }
   }
-  return Math.min(sum, 1.5);
+
+  /** Seconds to come back down from a given height. */
+  private static returnTime(peak: number): number {
+    return 3 + peak / 12;
+  }
+
+  lift(t: number): number {
+    const i = upperBound(this.t, t) - 1;
+    if (i < 0) return 0;
+    const x = t - this.t[i];
+    const peak = this.to[i];
+    if (x < SunMotion.JUMP) return this.from[i] + (peak - this.from[i]) * ease(x / SunMotion.JUMP);
+    const y = x - SunMotion.JUMP - SunMotion.HOLD;
+    if (y < 0) return peak;
+    return peak * (1 - ease(Math.min(1, y / SunMotion.returnTime(peak))));
+  }
 }
+
+/** Smootherstep: an S-curve from 0 to 1 with zero speed and acceleration at both ends. */
+const ease = (x: number) => {
+  const k = Math.min(1, Math.max(0, x));
+  return k * k * k * (k * (6 * k - 15) + 10);
+};
 
 function sampleCurve(c: { rate: number; values: number[] }, t: number): number {
   const x = t * c.rate;

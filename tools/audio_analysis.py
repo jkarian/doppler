@@ -7,6 +7,7 @@ The file holds:
     downbeats   bar starts (assumes 4/4; phase picked by where the low end hits hardest)
     loudness    0..1 perceived loudness at `rate` values per second
     bass        0..1 energy under ~150 Hz, same rate
+    hats        [time, strength] of high-frequency hits (hats, shakers), for flicker
     sections    [{start, end, kind}] with kind = quiet | build | drop | normal
 """
 
@@ -106,6 +107,7 @@ def analyse(path: Path) -> dict:
     loudness = np.interp(times, frame_times, loud)
     bass_curve = np.interp(times, frame_times, uniform_filter1d(bass, size=max(1, int(frame_rate * 0.1))))
 
+    hats = find_hats(y, sr)
     sections = find_sections(loudness, bass_curve, LOUDNESS_RATE, duration)
     # A drop starts on its first big hit: move each drop to the beat with the strongest bass attack
     # within a beat of where the loudness curves put it (smoothing makes those land a little late).
@@ -137,7 +139,20 @@ def analyse(path: Path) -> dict:
         "loudness": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in loudness]},
         "bass": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in bass_curve]},
         "sections": sections,
+        "hats": hats,
     }
+
+
+def find_hats(y: np.ndarray, sr: int) -> list[list[float]]:
+    """High-frequency hits (hats, shakers, cymbal ticks): [time, strength 0..1], for flicker effects."""
+    high = librosa.onset.onset_strength(y=y, sr=sr, hop_length=BEAT_HOP, fmin=5000, n_mels=32)
+    if high.max() <= 0:
+        return []
+    high = high / np.percentile(high[high > 0], 99)
+    # At least ~40 ms apart, and clearly above the local average.
+    peaks = librosa.util.peak_pick(high, pre_max=3, post_max=3, pre_avg=12, post_avg=12, delta=0.15, wait=7)
+    times = librosa.frames_to_time(peaks, sr=sr, hop_length=BEAT_HOP)
+    return [[round(float(t), 3), round(float(min(1.0, high[p])), 2)] for t, p in zip(times, peaks) if high[p] > 0.2]
 
 
 def find_sections(loudness: np.ndarray, bass: np.ndarray, rate: int, duration: float) -> list[dict]:
