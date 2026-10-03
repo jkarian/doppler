@@ -628,10 +628,46 @@ async function main() {
     return [e1, cross(d, e1)];
   };
 
-  // Ring drags work like Maya's rotate tool: at the grab, the ring's direction on screen there (its tangent);
-  // after that only mouse movement along it counts, RING_PX pixels = one radian. Robust when a ring is seen
-  // edge-on, where its front and back overlap on screen.
-  type Grab = { i: number; handle: "point" | RingHandle; a?: number; sx?: number; sy?: number; tx?: number; ty?: number; v0?: number };
+  // Ring drags. A ring that looks round enough is followed around: each move takes the nearest point on the
+  // ring within 60 degrees of the last one (so it never jumps to the far side), and the angle travelled is
+  // the rotation, all the way round. A ring seen nearly edge-on (front and back overlap on screen) works
+  // like Maya's: only movement along its direction at the grab counts, RING_PX pixels = one radian.
+  type Grab = {
+    i: number;
+    handle: "point" | RingHandle;
+    a?: number;
+    edgeOn?: boolean;
+    sx?: number;
+    sy?: number;
+    tx?: number;
+    ty?: number;
+    v0?: number;
+    turn0?: number; // turn at the grab, for tilting over the top
+  };
+  // Tilt past straight up (or down) carries on over the top, like a moving head: the turn swaps by 180
+  // and the tilt comes back down the other side. Returns [turn, tilt] in degrees, and whether it flipped.
+  const overTheTop = (turn: number, tilt: number): [number, number, boolean] => {
+    const t = (wrapAngle(tilt * rad) * 180) / Math.PI;
+    if (t > 90) return [(wrapAngle((turn + 180) * rad) * 180) / Math.PI, 180 - t, true];
+    if (t < -90) return [(wrapAngle((turn + 180) * rad) * 180) / Math.PI, -180 - t, true];
+    return [turn, t, false];
+  };
+  // How flat a ring looks: the short axis of its on-screen outline over the long one.
+  const ringRoundness = (ring: { x: number; y: number }[]) => {
+    const n = ring.length;
+    const mx = ring.reduce((t, r) => t + r.x, 0) / n;
+    const my = ring.reduce((t, r) => t + r.y, 0) / n;
+    let sxx = 0;
+    let syy = 0;
+    let sxy = 0;
+    for (const r of ring) (sxx += (r.x - mx) ** 2), (syy += (r.y - my) ** 2), (sxy += (r.x - mx) * (r.y - my));
+    const tr = sxx + syy;
+    const det = sxx * syy - sxy * sxy;
+    const disc = Math.sqrt(Math.max(0, (tr * tr) / 4 - det));
+    const big = tr / 2 + disc;
+    const small = Math.max(0, tr / 2 - disc);
+    return big > 0 ? Math.sqrt(small / big) : 0;
+  };
   let grab: Grab | null = null;
   let hover: Grab | null = null;
   const hitTest = (m: Module, x: number, y: number, within = 18): Grab | null => {
@@ -754,7 +790,7 @@ async function main() {
           const l = Math.hypot(tx, ty);
           if (l < 1e-3) (tx = 1), (ty = 0);
           else (tx /= l), (ty /= l);
-          Object.assign(grab, { sx: e.clientX, sy: e.clientY, tx, ty, v0: hit.handle === "turn" ? q[2] : q[3] });
+          Object.assign(grab, { sx: e.clientX, sy: e.clientY, tx, ty, v0: hit.handle === "turn" ? q[2] : q[3], turn0: q[2], edgeOn: ringRoundness(ring) < 0.3 });
         }
         canvas.setPointerCapture(e.pointerId);
         return;
@@ -789,11 +825,29 @@ async function main() {
       const [u, v] = toImageUv(e);
       const q = pts[grab.i];
       if (grab.handle === "turn" || grab.handle === "tilt") {
-        // Mouse movement along the ring's direction at the grab: RING_PX pixels = one radian.
-        const along = (e.clientX - grab.sx!) * grab.tx! + (e.clientY - grab.sy!) * grab.ty!;
-        const deg = ((along / RING_PX) * 180) / Math.PI * (e.shiftKey ? 0.25 : 1);
-        if (grab.handle === "turn") q[2] = (wrapAngle((grab.v0! + deg) * rad) * 180) / Math.PI;
-        else q[3] = clamp(grab.v0! + deg, -89, 89);
+        let deg: number;
+        if (grab.edgeOn) {
+          // Edge-on: movement along the ring's direction at the grab.
+          const along = (e.clientX - grab.sx!) * grab.tx! + (e.clientY - grab.sy!) * grab.ty!;
+          deg = ((along / RING_PX) * 180) / Math.PI;
+        } else {
+          // Round enough: follow the cursor around the ring, step by step.
+          const ring = ringPoints(q, grab.handle).pts.filter((r) => Math.abs(wrapAngle(r.a - grab!.a!)) < Math.PI / 3);
+          const near = nearestOnRing(ring, e.clientX, e.clientY);
+          const step = Number.isFinite(near.d) ? wrapAngle(near.a - grab.a!) : 0;
+          if (Number.isFinite(near.d)) grab.a = near.a;
+          deg = (step * 180) / Math.PI;
+          grab.v0 = grab.handle === "turn" ? q[2] : q[3]; // step from where it is now
+        }
+        deg *= e.shiftKey ? 0.25 : 1;
+        if (grab.handle === "turn") q[2] = (wrapAngle((grab.v0 + deg) * rad) * 180) / Math.PI;
+        else {
+          const [turn, tilt, flipped] = overTheTop(grab.edgeOn ? grab.turn0! : q[2], grab.v0 + deg);
+          q[2] = turn;
+          q[3] = tilt;
+          // Over the top, the ring's angles run the other way round: keep following the same point on it.
+          if (flipped && !grab.edgeOn) grab.a = wrapAngle(Math.PI - grab.a!);
+        }
       } else (q[0] = u), (q[1] = v);
       return writePoints(placing, pts, false);
     }
