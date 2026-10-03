@@ -175,14 +175,7 @@ struct Nooks {
   l: array<Nook, 16>,
 };
 @group(0) @binding(9) var<storage, read> nooks: Nooks;
-@group(0) @binding(10) var shadowTex2: texture_2d<f32>;
-// The other layer's depth: the background layer's when drawing the main layer (and vice versa). The main
-// layer only drops a silhouette where the background layer has hidden rock behind it.
-@group(0) @binding(11) var otherDepthTex: texture_2d<f32>;
-fn otherDepth(uv: vec2f) -> f32 {
-  let i = clamp(vec2i(uv * u.imgSize), vec2i(0), vec2i(u.imgSize) - 1);
-  return textureLoad(otherDepthTex, i, 0).r;
-}  // nook lights 4-7's visibility (see fs_shadow)
+@group(0) @binding(10) var shadowTex2: texture_2d<f32>;  // nook lights 4-7's visibility (see fs_shadow)
 const NOOK_SHADOWS = 7u;
 
 // Bright at the light, easing to nothing at the radius.
@@ -440,18 +433,16 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   let q = pc.xy / (pc.z * tanXY) + u.camPos.xy / (u.pivotZ * tanXY);
   var out: VsOut;
   out.pos = vec4f((q - u.center) * u.viewScale, clamp(pc.z / (u.far * 2.0), 0.0, 1.0), 1.0);
-  // With a background layer, both layers drop the squares that span a silhouette (stretched, they show as
-  // dark seams when the camera moves). The main layer's gaps are filled by the background layer's hidden
-  // rock; the background layer's own silhouettes (where its band of hidden rock meets the near object it
-  // sits behind) would otherwise slide out from behind that object as a ghost outline.
-  var covered = layer == 1u;
-  if (layer == 0u && silhouette && u.up.w > 0.5) {
-    for (var k = 0u; k < 4u; k++) {
-      let c = vec2f(g0 + vec2u(k & 1u, k >> 1u)) / u.grid;
-      if (otherDepth(c) > depthAt(c) * 1.05) { covered = true; }
-    }
+  // With a background layer, squares that span a silhouette (stretched, they show as seams when the camera
+  // moves) are pushed back in the depth test instead of removed, so nothing ever opens a black hole:
+  //   real surfaces (both layers) > the main layer's stretched edges > the background layer's stretched edges.
+  // Where hidden rock exists, it covers the main layer's stretched edge; where it doesn't (the camera moved
+  // further than the band reaches, or an edge has no band), the stretched edge shows as before. The
+  // background layer's own seam (where its band meets the object it sits behind) stays behind everything,
+  // so it can't slide out as a ghost outline.
+  if (silhouette && u.up.w > 0.5) {
+    out.pos.z = clamp(out.pos.z * select(1.25, 1.6, layer == 1u), 0.0, 1.0);
   }
-  if (silhouette && u.up.w > 0.5 && covered) { out.pos = vec4f(0.0, 0.0, -1.0, 1.0); }
   out.uv = uv;
   out.layer = layer;
   return out;
