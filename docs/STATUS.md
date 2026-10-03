@@ -1,6 +1,6 @@
 # Doppler Canyon: status and handoff
 
-Last updated 2026-10-03. Read this first when picking the project back up.
+Last updated 2026-10-03 (evening). Read this first when picking the project back up.
 
 ## What it is
 
@@ -43,22 +43,36 @@ npm run dev
   2.14). v1 files are kept in `captures/analysis-v1/`. Tuned on our 4 tracks only; All-In-One could be added
   as an extra boundary voter if new tracks come out wrong.
 - `src/display.ts` + `src/scene.wgsl`: WebGPU renderer. Depth-displaced mesh, camera with parallax sway,
-  image-space shadows (enclosed "cave" rules for the sun), shafts, flare, lasers, scan, brightness cap,
-  mipmaps. ~4.4 ms/frame at 1080p on the 4090.
-- `src/graph/*`: node graph runtime, node library, expression language. `graphs/default.json` drives the
-  sun, camera, tone, lasers and scan. Contract: `docs/graph-format.md`.
+  image-space shadows (enclosed "cave" rules for the sun, thinning with distance), shafts, flare, lasers
+  (occluded by rock in front), scan, nook lights (16 lit, 7 shadowed), sky gradient, brightness cap.
+  ~2 ms/frame at 1080p on the 4090 with every light on.
+- `src/graph/*`: node graph runtime, node library, expression language, plain-language help for every
+  setting (`help.ts`). `graphs/default.json` drives everything. Contract: `docs/graph-format.md`.
 - `src/editor.ts`: node editor with live values (BroadcastChannel), save via the dev server.
+- `src/monitor.ts` (G on the display): music monitor. Track timeline (sections, drops, phrases, energy,
+  tension, sun height, a lane per setup), equalizer meters, master sliders (sun, direction, bounce, floor
+  light, brightness cap, nook lights, sky, visual lead), a Setups table (on/off, section chips, each setup's
+  sliders), pop-up explanations, Save. The display picks up the graph file when it changes on disk and warns
+  when it has unsaved edits instead.
+- Placement (N on the display, Tab switches module): nook lights (drag, scroll for area, shift+scroll for
+  brightness; blue rings = near lights) and laser rigs (drag to move, aim handle for turn/tilt, scroll for the
+  search cone). Banner at the top lists the controls.
 
 ## Current look (default graph)
 
-- Sun: rests just above the horizon seen through the gap, spurts up on strong bass bars and drops (heavy:
-  eased rise, hold, long S-curve back, spring follower), on/off gate from kick + intensity (fast on, slow off,
-  20% ember when off), hats flicker, kick pump on shafts and sky.
-- Lasers (4 fixtures max): red ground rigs (fixed spots on floor/ledge tops, re-aim every 2 bars, drift);
-  sky-down "god lasers" in drops only; magenta sky curtains (contours on the rock); pink sheet from the far
-  plateau rim. Beam profile: hard core 100%, glow starts at 50% and falls off. Light on rock fades with
-  distance to 30%; `reach` stops rock light before the unreliable far canyon.
-- Scan: single depth slice sweeping every 2 bars in drops, beam-style core with an 80 ft trail.
+Everything is a **setup** (a module) switched by the song's sections through a Setup node: master on/off,
+which section kinds it plays in, fades. The user wants setups combined in drops, more intense ones there.
+
+- Nook lights (first setup, on except in the outro): hand-placed amber pools in nooks of the rock, real size
+  (so far ones look smaller), cut off by rock in between. Mid/far lights fire on the tick-tock (named sounds:
+  tick on the left half, tock on the right, fade 2 s); near lights (under 8000 ft) only on drops (fade 4.5 s).
+- Sun (always): rests just above the gap's horizon, spurts on strong bars and drops (heavy, eased); colour by
+  height (SunTint: red-orange low to near white high); lights walls and high ground, not the floor
+  (floorLight 0, floor = flat ground below -1500 ft or the cave floor); bounce light into shaded faces; gain 3,
+  brightness cap 2.5; ceiling (maxArc) set by the user. Sky: gradient by sun height (dusk from the user's
+  reference, golden, day) with the photo's clouds as texture.
+- Ground laser rigs (builds, drops, normal): six hand-placed rigs re-aiming within 30 degree cones every 2 bars.
+- Off for now (the user is isolating setups): god lasers, sky curtains, contour sheet, MRI scan.
 
 ## User preferences learned
 
@@ -75,6 +89,8 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 - Bliss (first track) loses its first drop's sun with the intensity-based gate, and has no reliable beat grid
   (no drums); beat-locked effects should multiply by `Beat.confidence`. Low priority.
 - Old spotlight mode isn't graph-driven.
+- Saving from a page that loaded an older graph overwrote newer file changes (fixed: the display now syncs
+  with the file). If a node seems to have vanished, check git history for graphs/default.json.
 
 ## Research (2026-10-03, overnight)
 
@@ -90,8 +106,11 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 
 ## Backlog / ideas
 
-- Use the new tension/phrase/drop signals in the look (wind-up before drops, blackout in gap bars,
-  laser pattern changes on phrase lines). Not wired into the default graph yet.
+- Open from the session: should the rigs' brightness stop depending on the sun's gate (the user hasn't
+  answered); a "what drives what" matrix in the monitor (sounds x setups); more named sounds / instrument
+  nodes (by example); bring the other setups back one by one and decide which combine in drops.
+- Use the tension/phrase signals in the look (wind-up before drops, blackout in gap bars, laser pattern
+  changes on phrase lines).
 - Camera mapping next: MoGe depth first; if not good enough, a separate "Regenerate from depth" step/node
   (depth-conditioned image generation, optional, not the default path).
 
