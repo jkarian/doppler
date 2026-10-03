@@ -42,7 +42,7 @@ struct Uniforms {
 
 // MRI-style scan: slices of constant depth (log distance), height or sideways position, sweeping
 // through the scene. Each slice lights a thin line where it cuts the rock; trailing slices fade.
-fn scanLight(p: vec3f) -> vec3f {
+fn scanLight(p: vec3f) -> f32 {
   let axis = i32(u.scan.x + 0.5);
   var c = log(max(p.z, 1e-3));
   if (axis == 1) { c = p.y; }
@@ -57,7 +57,7 @@ fn scanLight(p: vec3f) -> vec3f {
     let fade = 1.0 - f32(k) / f32(n);
     g += exp(-pow(d / thick, 2.0)) * fade * fade;
   }
-  return u.scanColor.rgb * (u.scanColor.a * g);
+  return u.scanColor.a * g;
 }
 
 // Lens flare, in screen space: a glow and starburst at the sun, and coloured ghosts along the line
@@ -125,7 +125,7 @@ struct Laser {
   aim: vec3f, sheet: f32,
   right: vec3f, halfSpread: f32,   // radians
   normal: vec3f, intensity: f32,   // normal of the fan's plane
-  color: vec3f, width: f32,        // width: radians as seen from the camera
+  color: vec3f, width: f32,        // width: beam thickness in scene units (thins with distance)
   hit: f32, maxLen: f32, pad0: f32, pad1: f32,
 };
 struct Lasers {
@@ -147,16 +147,35 @@ fn fanLength(li: u32, n: u32, a: f32, halfSpread: f32) -> f32 {
 // Light from the lasers reaching the camera along the view ray to surface point p (or the sky):
 // glowing beams in the air, a translucent sheet, hot spots where beams land, and contour lines where
 // a sheet's plane cuts the rock.
-fn laserLight(p: vec3f, sky: bool) -> vec3f {
+// Laser light, split two ways: `air` is glow in the air (beams, sheet planes), added on top after the
+// brightness cap like real additive laser light; `rock` lights the rock (hit spots, contour lines and
+// their spill), multiplying its colour like any light.
+struct LaserLight {
+  air: vec3f,
+  rock: vec3f,
+};
+
+// Laser and scan light fade with distance across the vista: full at the cave mouth, 30% at the far end
+// of the land, spread evenly in log distance (gentler than real life, so far rock still lights up).
+fn distanceFade(d: f32) -> f32 {
+  let k = clamp(log(max(d, 1.0)) / log(max(u.far / 1.5, 2.0)), 0.0, 1.0);
+  return mix(1.0, 0.3, k);
+}
+
+fn laserLight(p: vec3f, sky: bool) -> LaserLight {
   let cam = u.camPos;
   let toP = p - cam;
   let viewLen = select(length(toP), 1e7, sky);
   let v = normalize(toP);
-  var total = vec3f(0.0);
+  // Smallest thickness worth drawing: about a pixel. Thinner beams dim instead of shrinking further.
+  let minAng = 1.5 * 2.0 * u.tanHalfFov / (u.screen.y * u.viewScale.y);
+  var air = vec3f(0.0);
+  var rock = vec3f(0.0);
   for (var li = 0u; li < lasers.count; li++) {
     let L = lasers.l[li];
     let n = u32(L.count);
-    var g = 0.0;
+    var g = 0.0;  // glow in the air
+    var r = 0.0;  // light on the rock
     for (var bi = 0u; bi < n; bi++) {
       let ob = lasers.beams[(li * 24u + bi) * 2u];
       let db = lasers.beams[(li * 24u + bi) * 2u + 1u];
@@ -173,6 +192,10 @@ fn laserLight(p: vec3f, sky: bool) -> vec3f {
       let t = clamp(dot(o + s * d - cam, v), 0.0, viewLen);
       let gap = distance(cam + t * v, o + s * d);
       let ang = gap / max(t, 0.05);
+      // Physical thickness: thinner on screen the further away the closest point is.
+      let beamAng = L.width / max(t, 0.05);
+      let drawAng = max(beamAng, minAng);
+      let energy = beamAng / drawAng;
       // Curtain: a vertical sheet around this beam (sky lasers). Glow where the view ray crosses its
       // plane inside the wedge, and a line where the wedge's plane cuts the rock.
       if (db.w > 0.0) {
@@ -184,7 +207,7 @@ fn laserLight(p: vec3f, sky: bool) -> vec3f {
           let rel = cam + tp * v - o;
           let a = atan2(dot(rel, side), dot(rel, d));
           if (abs(a) <= db.w && length(rel) < b.w / max(cos(a), 0.2)) {
-            g += 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)); // faint haze: the contour lines carry it
+            g += 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * distanceFade(tp); // faint haze: the contour lines carry it
           }
         }
         if (!sky) {
@@ -192,17 +215,19 @@ fn laserLight(p: vec3f, sky: bool) -> vec3f {
           let a = atan2(dot(rel, side), dot(rel, d));
           if (abs(a) <= db.w && length(rel) <= b.w / max(cos(a), 0.2) * 1.05) {
             let thick = 0.0025 * distance(p, cam) + 0.002;
-            g += L.hit * 2.0 * exp(-pow(dot(rel, cn) / thick, 2.0));
+            let off = dot(rel, cn);
+            r += L.hit * (2.0 * exp(-pow(off / thick, 2.0)) + 0.25 * exp(-pow(off / (thick * 8.0), 2.0)));
           }
         }
       }
       // A sheet reads as a plane: its individual beams fade back.
-      g += (exp(-pow(ang / L.width, 2.0)) + 0.1 * exp(-ang / (L.width * 6.0))) * mix(1.0, 0.12, L.sheet);
+      g += (exp(-pow(ang / drawAng, 2.0)) + 0.1 * exp(-ang / (drawAng * 6.0))) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
-        let r = 0.004 * distance(end, cam) + 0.002;
-        g += L.hit * 2.0 * exp(-pow(distance(p, end) / r, 2.0));
+        let rad = 0.004 * distance(end, cam) + 0.002;
+        let dist = distance(p, end);
+        r += L.hit * (2.0 * exp(-pow(dist / rad, 2.0)) + 0.3 * exp(-pow(dist / (rad * 6.0), 2.0)));
       }
     }
     if (L.sheet > 0.0) {
@@ -214,7 +239,7 @@ fn laserLight(p: vec3f, sky: bool) -> vec3f {
         let a = atan2(dot(rel, L.right), dot(rel, L.aim));
         if (abs(a) <= L.halfSpread && length(rel) < fanLength(li, n, a, L.halfSpread)) {
           // Faint: light scattered by haze. The contour lines and edges carry the shape.
-          g += L.sheet * 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * exp(-length(rel) / (u.far * 0.08));
+          g += L.sheet * 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp);
         }
       }
       // Contour line where the plane cuts the rock it reaches.
@@ -224,13 +249,14 @@ fn laserLight(p: vec3f, sky: bool) -> vec3f {
         if (abs(a) <= L.halfSpread && length(rel) <= fanLength(li, n, a, L.halfSpread) * 1.03 + 0.02) {
           let off = dot(rel, L.normal);
           let thick = 0.0025 * distance(p, cam) + 0.002;
-          g += L.sheet * L.hit * 2.5 * exp(-pow(off / thick, 2.0));
+          r += L.sheet * L.hit * (2.5 * exp(-pow(off / thick, 2.0)) + 0.3 * exp(-pow(off / (thick * 8.0), 2.0)));
         }
       }
     }
-    total += L.color * (L.intensity * g);
+    air += L.color * (L.intensity * g);
+    rock += L.color * (L.intensity * r * distanceFade(length(toP)));
   }
-  return total;
+  return LaserLight(air, rock);
 }
 
 
@@ -461,12 +487,20 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   let air = smoothstep(u.far * 0.02, u.far * 0.12, z);
   color += u.lightColor * (u.rays * air * textureSampleLevel(raysTex, samp, uv, 0.0).r);
   if (u.flare > 0.0) { color += lensFlare(frag.xy) * u.lightColor; }
-  if (u.scanColor.a > 0.0 && !sky) { color += scanLight(p); }
-  if (lasers.count > 0u) { color += laserLight(select(p, viewPos(uv, u.far * 4.0), sky), sky); }
+  // Lasers and the scan light the rock: they multiply its colour (with a little floor so dark rock
+  // still shows the line), then go through the cap with everything else.
+  var las = LaserLight(vec3f(0.0), vec3f(0.0));
+  if (lasers.count > 0u) { las = laserLight(select(p, viewPos(uv, u.far * 4.0), sky), sky); }
+  var scanRock = vec3f(0.0);
+  if (u.scanColor.a > 0.0 && !sky) { scanRock = u.scanColor.rgb * scanLight(p) * distanceFade(distance(p, u.camPos)); }
+  let rockLight = las.rock + scanRock;
+  color += (albedo + 0.08) * rockLight * 2.0;
 
   // Brightness cap on luminance, keeping hue, so stacked lights roll off instead of clipping to white.
   let lum = dot(color, vec3f(0.2126, 0.7152, 0.0722));
   color *= (u.cap * (1.0 - exp(-lum / u.cap))) / max(lum, 1e-5);
+  // Additive on top, after the cap: laser glow in the air, plus a hot core where light hits the rock.
+  color += las.air + rockLight * 0.15;
 
   let view = i32(u.view + 0.5);
   if (view == 1) { color = albedo; }

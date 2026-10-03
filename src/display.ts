@@ -708,7 +708,8 @@ async function main() {
       const normal = normalize(cross(aim, right));
       const half = (L.spread / 2) * rad;
       const base = 4 + li * 24;
-      laserData.set([...o, L.count, ...aim, L.sheet, ...right, half, ...normal, L.intensity, ...(L.color as Vec3), L.width * rad, L.hit, maxLen, 0, 0], base);
+      // Width: degrees as seen from the middle distance of the scene, turned into a physical thickness.
+      laserData.set([...o, L.count, ...aim, L.sheet, ...right, half, ...normal, L.intensity, ...(L.color as Vec3), L.width * rad * pivotZ, L.hit, maxLen, 0, 0], base);
       for (let bi = 0; bi < L.count; bi++) {
         const a = L.count > 1 ? -half + (2 * half * bi) / (L.count - 1) : 0;
         const d = normalize(aim.map((x, i) => x * Math.cos(a) + right[i] * Math.sin(a)) as Vec3);
@@ -723,7 +724,7 @@ async function main() {
       const step = Math.floor(S.trigger);
       const brightness = S.intensity * Math.exp(-(S.trigger - step) * S.fade);
       const height = info.far * 0.6;
-      laserData.set([0, 0, 0, S.count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad, S.hit, maxLen, 0, 0], 4 + li * 24);
+      laserData.set([0, 0, 0, S.count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, 0, 0], 4 + li * 24);
       for (let bi = 0; bi < S.count; bi++) {
         const rand = seeded(S.seed * 100003 + step * 101 + bi);
         let u = 0.5;
