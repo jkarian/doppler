@@ -110,6 +110,18 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
   our own stem-based drop/build labels -> tension, energy and anticipation curves. Bliss needs a no-grid mode.
 - Test scripts, outputs and Windows workarounds for both are kept locally in `captures/research/`.
 
+## Plan (agreed 2026-10-03)
+
+1. Lasers: done for now (hand-placed rigs, rotate rings, real-world angles, sky reach).
+2. Camera mapping (next): MoGe depth first, compared side by side with ours; if not good enough, an optional
+   "Regenerate from depth" step. Goals: fix edge slivers (two-layer depth with the hidden background filled
+   in), trustworthy shadows (shadowDepth is a guess today), better far-canyon depth.
+3. Patterns. Structure: Scene -> Arrangement (when: which pattern on which setup in which song part) ->
+   Pattern x Setup (how x what; patterns reusable across setups) -> Objects -> Elements -> Nodes -> Code.
+   Foundation: a shared Houdini-style point/attribute model (every element has position, colour, brightness,
+   group, index...), a spreadsheet view, per-element expressions (wrangle-like), groups by rule. Start with
+   nook lights and rigs sharing it, plus 2-3 patterns (chase, alternate sides, ripple).
+
 ## Backlog / ideas
 
 - Open from the session: should the rigs' brightness stop depending on the sun's gate (the user hasn't
