@@ -436,9 +436,9 @@
     1300,
     560
    ],
-   "name": "Sheet height: 8 bars",
+   "name": "Sheet tilt: 8 bars",
    "params": {
-    "expr": "0.3 + 0.1 * sin(tau * a / 8)"
+    "expr": "-4 + 3 * sin(tau * a / 8)"
    }
   },
   {
@@ -477,13 +477,102 @@
    "name": "Contour sheet",
    "params": {
     "originU": 0.5,
-    "originDepth": 0.5,
-    "azimuth": 0,
-    "elevation": -22,
-    "spread": 140,
+    "originDepth": 0,
+    "azimuth": 180,
+    "elevation": -4,
+    "spread": 60,
     "count": 24,
     "width": 0.05,
     "sheet": 1,
+    "hit": 1.5,
+    "originV": 0.225
+   }
+  },
+  {
+   "id": "skyStep",
+   "type": "Expression",
+   "pos": [
+    1300,
+    1050
+   ],
+   "name": "Every half bar",
+   "params": {
+    "expr": "a * 2"
+   }
+  },
+  {
+   "id": "skyLevel",
+   "type": "Expression",
+   "pos": [
+    1300,
+    1180
+   ],
+   "name": "Sky beam brightness",
+   "params": {
+    "expr": "1.4 * a * (0.6 + 0.4 * b)"
+   }
+  },
+  {
+   "id": "skyColor",
+   "type": "Color",
+   "pos": [
+    1300,
+    1330
+   ],
+   "name": "Laser ice blue",
+   "params": {
+    "r": 0.55,
+    "g": 0.8,
+    "b": 1
+   }
+  },
+  {
+   "id": "skyBeams",
+   "type": "SkyLaser",
+   "pos": [
+    1630,
+    1050
+   ],
+   "name": "Sky beams",
+   "params": {
+    "count": 4,
+    "seed": 1,
+    "tilt": 10,
+    "fade": 1.5,
+    "width": 0.07,
+    "hit": 2
+   }
+  },
+  {
+   "id": "curtainColor",
+   "type": "Color",
+   "pos": [
+    1300,
+    1490
+   ],
+   "name": "Laser magenta",
+   "params": {
+    "r": 1,
+    "g": 0.15,
+    "b": 0.8
+   }
+  },
+  {
+   "id": "skyCurtains",
+   "type": "SkyLaser",
+   "pos": [
+    1630,
+    1450
+   ],
+   "name": "Sky curtains",
+   "params": {
+    "count": 2,
+    "seed": 7,
+    "tilt": 4,
+    "sheet": 1,
+    "sheetWidth": 8,
+    "fade": 0.8,
+    "width": 0.05,
     "hit": 1.5
    }
   }
@@ -1066,7 +1155,7 @@
    ],
    "to": [
     "laserSheet",
-    "originV"
+    "elevation"
    ]
   },
   {
@@ -1086,6 +1175,96 @@
    ],
    "to": [
     "laserSheet",
+    "color"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "skyStep",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "gate",
+    "value"
+   ],
+   "to": [
+    "skyLevel",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "skyLevel",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "skyStep",
+    "value"
+   ],
+   "to": [
+    "skyBeams",
+    "trigger"
+   ]
+  },
+  {
+   "from": [
+    "skyLevel",
+    "value"
+   ],
+   "to": [
+    "skyBeams",
+    "intensity"
+   ]
+  },
+  {
+   "from": [
+    "skyColor",
+    "color"
+   ],
+   "to": [
+    "skyBeams",
+    "color"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "skyCurtains",
+    "trigger"
+   ]
+  },
+  {
+   "from": [
+    "sheetLevel",
+    "value"
+   ],
+   "to": [
+    "skyCurtains",
+    "intensity"
+   ]
+  },
+  {
+   "from": [
+    "curtainColor",
+    "color"
+   ],
+   "to": [
+    "skyCurtains",
     "color"
    ]
   }

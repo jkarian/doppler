@@ -107,17 +107,17 @@ struct Laser {
 struct Lasers {
   count: u32, pad0: u32, pad1: u32, pad2: u32,
   l: array<Laser, 4>,
-  beams: array<vec4f, 96>,         // laser * 24 + beam: direction, length
+  beams: array<vec4f, 192>,        // (laser * 24 + beam) * 2: [origin, length], [direction, sheet half-angle]
 };
 @group(0) @binding(8) var<storage, read> lasers: Lasers;
 
 // Length of a laser's fan at an angle inside it, interpolated between its beams.
 fn fanLength(li: u32, n: u32, a: f32, halfSpread: f32) -> f32 {
-  if (n < 2u) { return lasers.beams[li * 24u].w; }
+  if (n < 2u) { return lasers.beams[(li * 24u) * 2u].w; }
   let f = clamp((a / max(halfSpread, 1e-4)) * 0.5 + 0.5, 0.0, 1.0) * f32(n - 1u);
   let i0 = u32(floor(f));
   let i1 = min(i0 + 1u, n - 1u);
-  return mix(lasers.beams[li * 24u + i0].w, lasers.beams[li * 24u + i1].w, fract(f));
+  return mix(lasers.beams[(li * 24u + i0) * 2u].w, lasers.beams[(li * 24u + i1) * 2u].w, fract(f));
 }
 
 // Light from the lasers reaching the camera along the view ray to surface point p (or the sky):
@@ -134,23 +134,49 @@ fn laserLight(p: vec3f, sky: bool) -> vec3f {
     let n = u32(L.count);
     var g = 0.0;
     for (var bi = 0u; bi < n; bi++) {
-      let b = lasers.beams[li * 24u + bi];
-      let d = b.xyz;
-      // Closest approach between the view ray (cam + t v) and the beam (origin + s d, 0 <= s <= len).
-      let w0 = cam - L.origin;
+      let ob = lasers.beams[(li * 24u + bi) * 2u];
+      let db = lasers.beams[(li * 24u + bi) * 2u + 1u];
+      let o = ob.xyz;
+      let d = db.xyz;
+      let b = vec4f(d, ob.w);
+      // Closest approach between the view ray (cam + t v) and the beam (o + s d, 0 <= s <= len).
+      let w0 = cam - o;
       let bb = dot(v, d);
       let dd = dot(v, w0);
       let ee = dot(d, w0);
       let denom = max(1.0 - bb * bb, 1e-6);
       let s = clamp((ee - bb * dd) / denom, 0.0, b.w);
-      let t = clamp(dot(L.origin + s * d - cam, v), 0.0, viewLen);
-      let gap = distance(cam + t * v, L.origin + s * d);
+      let t = clamp(dot(o + s * d - cam, v), 0.0, viewLen);
+      let gap = distance(cam + t * v, o + s * d);
       let ang = gap / max(t, 0.05);
+      // Curtain: a vertical sheet around this beam (sky lasers). Glow where the view ray crosses its
+      // plane inside the wedge, and a line where the wedge's plane cuts the rock.
+      if (db.w > 0.0) {
+        let side = normalize(cross(d, vec3f(0.0, 0.0, 1.0)));
+        let cn = normalize(cross(d, side));
+        let vn = dot(v, cn);
+        let tp = dot(o - cam, cn) / select(vn, 1e-6, abs(vn) < 1e-6);
+        if (tp > 0.0 && tp < viewLen) {
+          let rel = cam + tp * v - o;
+          let a = atan2(dot(rel, side), dot(rel, d));
+          if (abs(a) <= db.w && length(rel) < b.w / max(cos(a), 0.2)) {
+            g += 0.05 * min(6.0, 1.0 / max(abs(vn), 0.03));
+          }
+        }
+        if (!sky) {
+          let rel = p - o;
+          let a = atan2(dot(rel, side), dot(rel, d));
+          if (abs(a) <= db.w && length(rel) <= b.w / max(cos(a), 0.2) * 1.05) {
+            let thick = 0.0025 * distance(p, cam) + 0.002;
+            g += L.hit * 2.0 * exp(-pow(dot(rel, cn) / thick, 2.0));
+          }
+        }
+      }
       // A sheet reads as a plane: its individual beams fade back.
       g += (exp(-pow(ang / L.width, 2.0)) + 0.1 * exp(-ang / (L.width * 6.0))) * mix(1.0, 0.12, L.sheet);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
-        let end = L.origin + b.w * d;
+        let end = o + b.w * d;
         let r = 0.004 * distance(end, cam) + 0.002;
         g += L.hit * 2.0 * exp(-pow(distance(p, end) / r, 2.0));
       }

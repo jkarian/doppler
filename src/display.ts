@@ -213,7 +213,7 @@ async function main() {
 
   const UNIFORM_FLOATS = 44;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
-  const LASER_FLOATS = 4 + 4 * 24 + 96 * 4;
+  const LASER_FLOATS = 4 + 4 * 24 + 192 * 4;
   const laserData = new Float32Array(LASER_FLOATS);
   const laserCount = new Uint32Array(laserData.buffer, 0, 1);
   const laserBuf = device.createBuffer({ size: LASER_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -599,7 +599,7 @@ async function main() {
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
-    writeLasers(graphOut.lasers ?? []);
+    writeLasers(graphOut.lasers ?? [], graphOut.skyLasers ?? []);
 
     const enc = device.createCommandEncoder();
     // march -> A, blur A -> B (horizontal), blur B -> A (vertical); the main pass reads A.
@@ -658,7 +658,8 @@ async function main() {
     }
     return maxLen;
   };
-  const writeLasers = (list: NonNullable<RenderOut["lasers"]>) => {
+  const beamSlot = (li: number, bi: number) => 4 + 4 * 24 + (li * 24 + bi) * 8;
+  const writeLasers = (list: NonNullable<RenderOut["lasers"]>, sky: NonNullable<RenderOut["skyLasers"]>) => {
     laserData.fill(0);
     const n = Math.min(4, list.length);
     const maxLen = info.far * 1.5;
@@ -682,10 +683,38 @@ async function main() {
       for (let bi = 0; bi < L.count; bi++) {
         const a = L.count > 1 ? -half + (2 * half * bi) / (L.count - 1) : 0;
         const d = normalize(aim.map((x, i) => x * Math.cos(a) + right[i] * Math.sin(a)) as Vec3);
-        laserData.set([...d, beamLength(o, d, maxLen)], 4 + 4 * 24 + (li * 24 + bi) * 4);
+        laserData.set([...o, beamLength(o, d, maxLen), ...d, 0], beamSlot(li, bi));
       }
     }
-    laserCount[0] = n;
+    // Sky lasers: beams from high above onto seeded random spots on the rock, new spots per trigger step.
+    let used = n;
+    for (const S of sky) {
+      if (used >= 4) break;
+      const li = used++;
+      const step = Math.floor(S.trigger);
+      const brightness = S.intensity * Math.exp(-(S.trigger - step) * S.fade);
+      const height = info.far * 0.6;
+      laserData.set([0, 0, 0, S.count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad, S.hit, maxLen, 0, 0], 4 + li * 24);
+      for (let bi = 0; bi < S.count; bi++) {
+        const rand = seeded(S.seed * 100003 + step * 101 + bi);
+        let u = 0.5;
+        let v = 0.5;
+        for (let tries = 0; tries < 40; tries++) {
+          u = S.uMin + (S.uMax - S.uMin) * rand();
+          v = S.vMin + (S.vMax - S.vMin) * rand();
+          const z = depthAt(u, v);
+          if (z < info.far * 0.9 && z >= S.minDepth) break; // on rock, out in the canyon, not sky
+        }
+        const target = viewPos(u, v);
+        const lean = S.tilt * rad * rand();
+        const turn = 2 * Math.PI * rand();
+        const o: Vec3 = [target[0] + Math.sin(lean) * Math.cos(turn) * height, target[1] + Math.cos(lean) * height, target[2] + Math.sin(lean) * Math.sin(turn) * height];
+        const len = Math.hypot(target[0] - o[0], target[1] - o[1], target[2] - o[2]);
+        const d = normalize([target[0] - o[0], target[1] - o[1], target[2] - o[2]]);
+        laserData.set([...o, len, ...d, S.sheet > 0.5 ? (S.sheetWidth / 2) * rad : 0], beamSlot(li, bi));
+      }
+    }
+    laserCount[0] = used;
     device.queue.writeBuffer(laserBuf, 0, laserData);
   };
 

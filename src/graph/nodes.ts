@@ -26,6 +26,26 @@ export interface SceneConsts {
 }
 
 /** What the output nodes produce for the renderer. Anything left out keeps the display's own setting. */
+/** Lasers from the sky: count beams (or vertical sheets) coming straight down onto random spots on the rock. */
+export interface SkyLaserOut {
+  count: number;
+  trigger: number; // new random spots each time floor(trigger) changes (wire a Beat or Bar count)
+  seed: number;
+  uMin: number; // area of the picture the beams land in
+  uMax: number;
+  vMin: number;
+  vMax: number;
+  minDepth: number; // only land on rock at least this far away (keeps them out in the canyon)
+  tilt: number; // degrees of random lean away from vertical
+  sheet: number; // 0: beams; 1: vertical curtains of light
+  sheetWidth: number; // degrees wide, for curtains
+  fade: number; // brightness falls with the trigger's phase: exp(-phase * fade)
+  width: number;
+  color: number[];
+  intensity: number;
+  hit: number;
+}
+
 export interface LaserOut {
   originU: number; // where it starts, as a point in the picture (0..1)
   originV: number;
@@ -44,6 +64,7 @@ export interface LaserOut {
 
 export interface RenderOut {
   lasers?: LaserOut[];
+  skyLasers?: SkyLaserOut[];
   sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number };
   camera?: { swayX: number; swayY: number; pushZ: number };
   tone?: { baseDim: number; baked: number; cap: number };
@@ -419,6 +440,43 @@ const defs: NodeDef[] = [
         azimuth: num(i.azimuth), elevation: num(i.elevation), roll: num(i.roll), spread: clamp(num(i.spread), 0, 180),
         count: Math.round(clamp(num(i.count), 1, 24)), width: Math.max(0.005, num(i.width)), color: vec(i.color),
         intensity: num(i.intensity), sheet: clamp(num(i.sheet), 0, 1), hit: Math.max(0, num(i.hit)),
+      });
+      return {};
+    },
+  },
+  {
+    type: "SkyLaser",
+    category: "Output",
+    doc:
+      "Lasers from the sky: count straight beams coming down onto random spots on the rock inside an area of the picture. " +
+      "New spots each time floor(trigger) changes (wire a Beat or Bar count); the same track always picks the same spots. " +
+      "sheet 1 makes them vertical curtains of light. Shares the 4-fixture limit with Laser.",
+    inputs: [
+      { name: "trigger", default: 0, step: 1 },
+      { name: "count", default: 4, min: 1, max: 24, step: 1 },
+      { name: "seed", default: 1, kind: "const", step: 1 },
+      { name: "uMin", default: 0.2, min: 0, max: 1, step: 0.01 },
+      { name: "uMax", default: 0.8, min: 0, max: 1, step: 0.01 },
+      { name: "vMin", default: 0.3, min: 0, max: 1, step: 0.01 },
+      { name: "vMax", default: 0.9, min: 0, max: 1, step: 0.01 },
+      { name: "minDepth", default: 3, min: 0, step: 0.1, doc: "only land on rock at least this far away" },
+      { name: "tilt", default: 12, min: 0, max: 60, step: 0.5 },
+      { name: "sheet", default: 0, min: 0, max: 1, step: 0.05 },
+      { name: "sheetWidth", default: 6, min: 0.5, max: 60, step: 0.5 },
+      { name: "fade", default: 2, min: 0, max: 20, step: 0.1 },
+      { name: "width", default: 0.07, min: 0.005, max: 2, step: 0.005 },
+      { name: "color", default: [0.2, 0.6, 1] },
+      { name: "intensity", default: 1, min: 0, step: 0.05 },
+      { name: "hit", default: 1.5, min: 0, step: 0.05 },
+    ],
+    outputs: [],
+    eval: (i, ctx) => {
+      if (num(i.intensity) <= 0) return {};
+      (ctx.out.skyLasers ??= []).push({
+        count: Math.round(clamp(num(i.count), 1, 24)), trigger: num(i.trigger), seed: num(i.seed),
+        uMin: num(i.uMin), uMax: num(i.uMax), vMin: num(i.vMin), vMax: num(i.vMax), minDepth: Math.max(0, num(i.minDepth)), tilt: Math.max(0, num(i.tilt)),
+        sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
+        width: Math.max(0.005, num(i.width)), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
       });
       return {};
     },
