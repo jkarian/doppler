@@ -537,8 +537,9 @@ async function main() {
   // --- Input ------------------------------------------------------------------
   // Placement (N): put each module's fixtures on the rock by hand. Tab switches module.
   //   Nook lights: drag a ring to move it, scroll over it for its area, shift+scroll for its brightness.
-  //   Laser rigs: drag the ring to move the rig; drag the aim handle next to it to turn (left/right) and
-  //   tilt (up/down) it, shift for fine; scroll over the ring for the search cone it re-aims within.
+  //   Laser rigs: drag the numbered ring to move the rig; rotate it like Maya's rotate tool: drag along the
+  //   green ring (lying flat) to turn, along the red ring (upright, through the beam) to tilt; shift for
+  //   fine. Scroll over the numbered ring for the search cone it re-aims within.
   //   Both: click empty rock to add, shift- or right-click to remove the nearest, Delete clears them all.
   // Edits go into the graph's nodes (and reach the editor); save with the monitor (G). Everything in the
   // module shows while placing.
@@ -592,29 +593,42 @@ async function main() {
     // How far out to draw the cone: a good way out, but not past the rock the beam would hit.
     return { o, d, len: Math.min(beamLength(o, d, info.far * 1.5), o[2] * 0.5) };
   };
-  // The aim handle sits a fixed distance from the rig on screen, in the direction the beam goes.
-  const AIM_HANDLE_PX = 70;
-  const aimHandle = (q: number[]) => {
-    const { o, d } = rigAim(q);
-    const [x, y] = uvToScreen(q[0], q[1]);
-    const step = Math.max(o[2] * 0.05, 1e-3);
-    const tip: Vec3 = [o[0] + d[0] * step, o[1] + d[1] * step, o[2] + d[2] * step];
-    let dx = 0;
-    let dy = -1;
-    if (tip[2] > 0.01) {
-      const [tx, ty] = uvToScreen(...project3(tip));
-      const l = Math.hypot(tx - x, ty - y);
-      if (l > 1e-3) (dx = (tx - x) / l), (dy = (ty - y) / l);
+  // Rotate rings, a fixed size on screen, centred on the rig: the turn ring lies flat (its angle is the
+  // beam's turn), the tilt ring stands upright through the beam (its angle is the beam's tilt).
+  const RING_PX = 70;
+  type RingHandle = "turn" | "tilt";
+  const ringPoints = (q: number[], which: RingHandle) => {
+    const o = rigOrigin(q[0], q[1]);
+    const R = (RING_PX * 2 * tanHalfFov * o[2]) / (innerHeight * viewScale[1]);
+    const az = q[2] * rad;
+    const out: { a: number; x: number; y: number }[] = [];
+    for (let k = 0; k <= 96; k++) {
+      const ang = -Math.PI + (2 * Math.PI * k) / 96;
+      const dir: Vec3 = which === "turn" ? [Math.sin(ang), 0, Math.cos(ang)] : [Math.sin(az) * Math.cos(ang), Math.sin(ang), Math.cos(az) * Math.cos(ang)];
+      const pnt: Vec3 = [o[0] + dir[0] * R, o[1] + dir[1] * R, o[2] + dir[2] * R];
+      if (pnt[2] > 0.01) {
+        const [x, y] = uvToScreen(...project3(pnt));
+        out.push({ a: ang, x, y });
+      }
     }
-    return [x + dx * AIM_HANDLE_PX, y + dy * AIM_HANDLE_PX];
+    return { pts: out, R, o };
   };
+  const nearestOnRing = (ring: { a: number; x: number; y: number }[], x: number, y: number) => {
+    let best = { a: 0, d: Infinity };
+    for (const r of ring) {
+      const d = Math.hypot(r.x - x, r.y - y);
+      if (d < best.d) best = { a: r.a, d };
+    }
+    return best;
+  };
+  const wrapAngle = (x: number) => Math.atan2(Math.sin(x), Math.cos(x));
   const coneBasis = (d: Vec3): [Vec3, Vec3] => {
     let e1 = normalize(cross([0, 1, 0], d));
     if (!Number.isFinite(e1[0])) e1 = [1, 0, 0];
     return [e1, cross(d, e1)];
   };
 
-  type Grab = { i: number; handle: "point" | "aim"; x?: number; y?: number };
+  type Grab = { i: number; handle: "point" | RingHandle; a?: number };
   let grab: Grab | null = null;
   let hover: Grab | null = null;
   const hitTest = (m: Module, x: number, y: number, within = 18): Grab | null => {
@@ -622,10 +636,17 @@ async function main() {
     let bd = within;
     readPoints(m).forEach((q, i) => {
       const handles: [Grab["handle"], number, number][] = [["point", ...(uvToScreen(q[0], q[1]) as [number, number])]];
-      if (m === "rigs") handles.push(["aim", ...(aimHandle(q) as [number, number])]);
       for (const [handle, sx, sy] of handles) {
         const d = Math.hypot(sx - x, sy - y);
         if (d < bd) (bd = d), (best = { i, handle });
+      }
+    });
+    if (best || m !== "rigs") return best;
+    // Rings: grab one within a few pixels of its line.
+    readPoints(m).forEach((q, i) => {
+      for (const which of ["turn", "tilt"] as const) {
+        const near = nearestOnRing(ringPoints(q, which).pts, x, y);
+        if (near.d < Math.min(bd, 9)) (bd = near.d), (best = { i, handle: which, a: near.a });
       }
     });
     return best;
@@ -664,9 +685,8 @@ async function main() {
         const { o, d, len } = rigAim(q);
         const [e1, e2] = coneBasis(d);
         const half = (q[4] / 2) * rad;
-        const color = isOn(i, "point") || isOn(i, "aim") ? "#fff" : "#ff7a6b";
+        const color = isOn(i, "point") ? "#fff" : "#ff7a6b";
         const [x, y] = uvToScreen(q[0], q[1]);
-        const [ax, ay] = aimHandle(q);
         // The search cone: its rim at the aim distance, and lines out to it.
         const rim: number[][] = [];
         for (let k = 0; k <= 32; k++) {
@@ -681,10 +701,24 @@ async function main() {
             svg += `<line x1="${x}" y1="${y}" x2="${p[0]}" y2="${p[1]}" stroke="${color}" stroke-dasharray="4 4" opacity="0.5"/>`;
           }
         }
-        svg += `<line x1="${x}" y1="${y}" x2="${ax}" y2="${ay}" stroke="${color}" stroke-width="1.5" opacity="0.8"/>`;
-        // Aim handle: a circle with turn/tilt arrows.
-        svg += `<circle cx="${ax}" cy="${ay}" r="11" fill="rgba(0,0,0,0.45)" stroke="${color}" stroke-width="2"/>`;
-        svg += `<path d="M${ax - 7} ${ay} h14 M${ax - 7} ${ay} l3 -3 M${ax - 7} ${ay} l3 3 M${ax + 7} ${ay} l-3 -3 M${ax + 7} ${ay} l-3 3 M${ax} ${ay - 7} v14 M${ax} ${ay - 7} l-3 3 M${ax} ${ay - 7} l3 3 M${ax} ${ay + 7} l-3 -3 M${ax} ${ay + 7} l3 -3" stroke="${color}" stroke-width="1.5" fill="none"/>`;
+        // Rotate rings: green lies flat (turn), red stands upright through the beam (tilt).
+        for (const [which, ringColor] of [["turn", "#5fd35f"], ["tilt", "#ff5f5f"]] as const) {
+          const { pts: rp } = ringPoints(q, which);
+          const hot = isOn(i, which);
+          if (rp.length > 2) {
+            svg += `<polyline points="${rp.map((r) => r.x + "," + r.y).join(" ")}" fill="none" stroke="${hot ? "#fff" : ringColor}" stroke-width="${hot ? 4 : 2.5}" opacity="0.9"/>`;
+          }
+        }
+        // The beam's direction, out past the rings, with a dot where it meets them.
+        const { R } = ringPoints(q, "turn");
+        const tip: Vec3 = [o[0] + d[0] * R * 1.5, o[1] + d[1] * R * 1.5, o[2] + d[2] * R * 1.5];
+        const mid: Vec3 = [o[0] + d[0] * R, o[1] + d[1] * R, o[2] + d[2] * R];
+        if (tip[2] > 0.01 && mid[2] > 0.01) {
+          const [tx, ty] = uvToScreen(...project3(tip));
+          const [mx, my] = uvToScreen(...project3(mid));
+          svg += `<line x1="${x}" y1="${y}" x2="${tx}" y2="${ty}" stroke="#ffd27a" stroke-width="2.5"/>`;
+          svg += `<circle cx="${mx}" cy="${my}" r="4" fill="#ffd27a"/>`;
+        }
         svg += ring(x, y, i + 1, color);
         svg += label(x + 13, y + 18, `turn ${Math.round(q[2])}° · tilt ${Math.round(q[3])}° · cone ${Math.round(q[4])}°`, color);
       });
@@ -692,7 +726,7 @@ async function main() {
     const how =
       m === "nooks"
         ? "drag a ring to move · scroll: area · shift+scroll: brightness"
-        : "drag the ring to move · drag the aim handle: left/right turns, up/down tilts (shift: fine) · scroll over the ring: search cone";
+        : "drag the number to move · drag the GREEN ring to turn, the RED ring to tilt (shift: fine) · scroll over the number: search cone";
     svg +=
       `<text x="50%" y="28" text-anchor="middle" fill="#fff" font-size="14" paint-order="stroke" stroke="#000" stroke-width="4">` +
       `PLACING ${MODULE_NAME[m]} (Tab: switch) · ${how} · click: add · shift/right-click: remove · Delete: clear · N: done · save in G</text>`;
@@ -705,7 +739,7 @@ async function main() {
     if (!e.shiftKey && e.button === 0) {
       const hit = hitTest(m, e.clientX, e.clientY);
       if (hit) {
-        grab = { ...hit, x: e.clientX, y: e.clientY };
+        grab = hit;
         canvas.setPointerCapture(e.pointerId);
         return;
       }
@@ -738,13 +772,13 @@ async function main() {
       const pts = readPoints(placing);
       const [u, v] = toImageUv(e);
       const q = pts[grab.i];
-      if (grab.handle === "aim") {
-        // Turntable: left/right turns, up/down tilts. Relative, so it never jumps.
-        const k = e.shiftKey ? 0.1 : 0.4;
-        q[2] = ((((q[2] + (e.clientX - grab.x!) * k + 180) % 360) + 360) % 360) - 180;
-        q[3] = clamp(q[3] - (e.clientY - grab.y!) * k, -89, 89);
-        grab.x = e.clientX;
-        grab.y = e.clientY;
+      if (grab.handle === "turn" || grab.handle === "tilt") {
+        // Follow the cursor around the ring: the angle it moved along the ring is the rotation.
+        const near = nearestOnRing(ringPoints(q, grab.handle).pts, e.clientX, e.clientY);
+        const step = wrapAngle(near.a - (grab.a ?? near.a)) * (e.shiftKey ? 0.25 : 1);
+        grab.a = near.a;
+        if (grab.handle === "turn") q[2] = (wrapAngle(q[2] * rad + step) * 180) / Math.PI;
+        else q[3] = clamp(q[3] + (step * 180) / Math.PI, -89, 89);
       } else (q[0] = u), (q[1] = v);
       return writePoints(placing, pts, false);
     }
