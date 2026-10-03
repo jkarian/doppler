@@ -248,7 +248,8 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       // A sheet reads as a plane: its individual beams fade back.
       // Level set so the core lands near full white and the glow stays below it: if both clipped to
       // white they'd merge into one soft band.
-      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
+      // Beams in the air don't depend on the depth map, so `reach` doesn't cut them; they only dim with distance.
+      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
