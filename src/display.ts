@@ -12,7 +12,7 @@
 //   space play/pause   J L seek 5 s   { } audio/video offset (10 ms; alt: 1 ms)   A auto light on/off
 //   S shadows   V cycle debug view   H show values   P save 1080p frame (shift: 4K)   C copy values   R reset   F full screen
 
-import { Music, SunMotion, seeded, type Analysis, type Spurt } from "./music.ts";
+import { Music, SunGate, SunMotion, seeded, type Analysis, type Spurt } from "./music.ts";
 
 type Vec3 = [number, number, number];
 
@@ -46,6 +46,7 @@ interface Look {
   sunAzimuth: number; // degrees: 0 = straight into the scene (behind the canyon), negative = left
   sunElevation: number; // degrees above the horizon
   rays: number; // visible sun shafts
+  flare: number; // lens flare strength
   sunArc?: number; // music-driven: degrees along the arc (0 front horizon, 90 overhead, 180 behind us)
 }
 
@@ -207,7 +208,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 40;
+  const UNIFORM_FLOATS = 44;
   const uniforms = new Float32Array(UNIFORM_FLOATS);
   const uniformBuf = device.createBuffer({ size: UNIFORM_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const bindGroup = device.createBindGroup({
@@ -288,6 +289,7 @@ async function main() {
       sunAzimuth: 3,
       sunElevation: 24,
       rays: 0.6,
+      flare: 0.8,
     };
   };
   let look = defaults();
@@ -353,6 +355,33 @@ async function main() {
   const musicSpurts: Spurt[] = music ? music.findSpurts() : [];
   const manualSpurts: Spurt[] = [];
   let sunMotion = new SunMotion(musicSpurts);
+  const sunGate = music ? new SunGate(music) : null;
+
+  // Where the sun is on screen (ndc), and how much of it is visible: the fraction of a small disc
+  // around it that is open sky. The flare uses both; behind the rock rim it dims.
+  let flareVisible = 0;
+  const sunScreen = (l: Look): [number, number] => {
+    flareVisible = 0;
+    if (!l.sun) return [0, 0];
+    const d = sunDirection(l);
+    if (d[2] < 0.05) return [0, 0];
+    const qx = d[0] / (d[2] * tanHalfFov * aspect);
+    const qy = d[1] / (d[2] * tanHalfFov);
+    const c = camPos(time);
+    let sky = 0;
+    for (let k = 0; k < 9; k++) {
+      const a = (k / 9) * 2 * Math.PI;
+      const r = k === 0 ? 0 : 0.012;
+      const u = qx * 0.5 + 0.5 + r * Math.cos(a);
+      const v = 0.5 - qy * 0.5 + r * Math.sin(a) * aspect;
+      if (u >= 0 && u <= 1 && v >= 0 && v <= 1 && depthAt(u, v) >= info.far * 0.98) sky++;
+    }
+    flareVisible = sky / 9;
+    // Same transform as the mesh (pan, zoom, parallax pivot) so the flare sits on the drawn sun.
+    const sx = (qx + c[0] / (pivotZ * tanHalfFov * aspect) - cam.center[0]) * viewScale[0];
+    const sy = (qy + c[1] / (pivotZ * tanHalfFov) - cam.center[1]) * viewScale[1];
+    return [sx, sy];
+  };
   const restArc = (t: number) => {
     if (!music) return look.sunElevation;
     let sum = 0;
@@ -373,13 +402,17 @@ async function main() {
     const loud = music ? 0.6 + 0.4 * music.energy(t, 2) : 1;
     // Flicker from the hats and shakers: quick dips, like light through moving cloud.
     const flicker = music ? 1 - 0.35 * music.flicker(t) : 1;
+    // On while the low end is in: snaps on, fades off.
+    const gate = sunGate ? sunGate.value(t) : 1;
     return {
       ...look,
       sunArc: arc,
       color: dawn.map((c, i) => c + (noon[i] - c) * up) as Vec3,
-      intensity: look.intensity * above * (0.8 + 0.8 * Math.min(1, Math.max(0, h))) * loud * flicker,
+      intensity: look.intensity * above * (0.8 + 0.8 * Math.min(1, Math.max(0, h))) * loud * flicker * gate,
+      // Flares most when the sun is low in the frame; scaled by visibility at draw time.
+      flare: look.flare * above * gate * flicker * (1 - 0.5 * up),
       // Shafts are a low-sun thing: strongest at dawn, fading as it climbs.
-      rays: look.rays * above * (1 - 0.7 * up) * loud,
+      rays: look.rays * above * (1 - 0.7 * up) * loud * gate,
     };
   };
 
@@ -522,6 +555,8 @@ async function main() {
       manualSpurts.push({ t: time, deg: e.shiftKey ? 40 : 20 });
       sunMotion = new SunMotion(musicSpurts.concat(manualSpurts));
     }
+    else if (key === "1") look.flare = clamp(look.flare / 1.25, 0, 5);
+    else if (key === "2") look.flare = clamp(look.flare * 1.25 || 0.05, 0, 5);
     else if (key === "5") look.rays = clamp(look.rays / 1.25, 0, 5);
     else if (key === "6") look.rays = clamp(look.rays * 1.25 || 0.05, 0, 5);
     else if (key === "7") look.baked = clamp(look.baked - 0.05, 0, 1);
@@ -560,7 +595,9 @@ async function main() {
       ...camPos(time), pivotZ,
       grid[0], grid[1], info.haze?.beta ?? 0, look.baked,
       look.sun ? 1 : 0, look.rays, caveDepth, 0,
+      ...sunScreen(look), 0, 0,
     ]);
+    uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
 
     const enc = device.createCommandEncoder();

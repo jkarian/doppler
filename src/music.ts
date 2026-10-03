@@ -214,6 +214,53 @@ export class SunMotion {
   }
 }
 
+/**
+ * Sun on/off from the low end: on while the kick and bass are in, off in breakdowns and the cut before
+ * a drop. Thresholds are relative to the track's own bass range (on above 60%, off below 45%, so a
+ * borderline moment doesn't flicker). Switches on fast (ATTACK) and fades off slowly (RELEASE).
+ * Precomputed at RATE Hz, so any time can be evaluated directly.
+ */
+export class SunGate {
+  static readonly RATE = 60;
+  static readonly ATTACK = 0.08; // seconds: snaps on
+  static readonly RELEASE = 1.2; // seconds: fades off over a couple of seconds
+  private readonly samples: Float32Array;
+
+  constructor(music: Music) {
+    const values = music.a.bass.values;
+    const sorted = [...values].sort((a, b) => a - b);
+    const pct = (f: number) => sorted[Math.floor((sorted.length - 1) * f)] ?? 0;
+    const lo = pct(0.1);
+    const hi = pct(0.9);
+    const on = lo + 0.6 * (hi - lo);
+    const off = lo + 0.45 * (hi - lo);
+    const n = Math.ceil(music.a.duration * SunGate.RATE) + 1;
+    this.samples = new Float32Array(n);
+    const dt = 1 / SunGate.RATE;
+    let lit = false;
+    let level = 0;
+    for (let k = 0; k < n; k++) {
+      const t = k * dt;
+      let bass = 0; // half a second of bass, so single kicks don't toggle it
+      for (let j = 0; j < 10; j++) bass += music.bass(t - j * 0.05);
+      bass /= 10;
+      if (!lit && bass > on) lit = true;
+      else if (lit && bass < off) lit = false;
+      const tau = lit ? SunGate.ATTACK : SunGate.RELEASE;
+      level += ((lit ? 1 : 0) - level) * (1 - Math.exp(-dt / tau));
+      this.samples[k] = level;
+    }
+  }
+
+  value(t: number): number {
+    const x = t * SunGate.RATE;
+    if (x <= 0) return this.samples[0] ?? 0;
+    const k = Math.floor(x);
+    if (k >= this.samples.length - 1) return this.samples.at(-1) ?? 0;
+    return this.samples[k] + (this.samples[k + 1] - this.samples[k]) * (x - k);
+  }
+}
+
 /** Smootherstep: an S-curve from 0 to 1 with zero speed and acceleration at both ends. */
 const ease = (x: number) => {
   const k = Math.min(1, Math.max(0, x));

@@ -31,7 +31,37 @@ struct Uniforms {
   sun: f32,            // 1: directional sun, lightPos holds the direction toward it. 0: spotlight
   rays: f32,           // strength of visible sun shafts in the air
   caveDepth: f32,      // sun shadows: rock nearer than this is the cave around the camera
+  flare: f32,          // lens flare strength (already scaled by how much of the sun is visible)
+  sunScreen: vec2f,    // the sun's position on screen, ndc
 };
+
+// Lens flare, in screen space: a glow and starburst at the sun, and coloured ghosts along the line
+// from the sun through the screen centre, the way reflections inside a camera lens line up.
+fn lensFlare(frag: vec2f) -> vec3f {
+  let p = vec2f(frag.x / u.screen.x * 2.0 - 1.0, 1.0 - frag.y / u.screen.y * 2.0);
+  let a = vec2f(u.screen.x / u.screen.y, 1.0);
+  let d = (p - u.sunScreen) * a;
+  let r = length(d);
+  let ang = atan2(d.y, d.x);
+  var c = vec3f(1.0, 0.85, 0.6) * (exp(-r * r * 60.0) * 1.2 + exp(-r * 3.5) * 0.12);
+  // Starburst: thin streaks, fading out from the sun.
+  let streak = pow(abs(cos(ang * 3.0)), 60.0) * 0.5 + pow(abs(cos(ang * 4.0 + 0.6)), 90.0) * 0.3;
+  c += vec3f(1.0, 0.9, 0.75) * streak * exp(-r * 2.5) * 0.5;
+  // Halo ring around the sun.
+  c += vec3f(0.6, 0.8, 1.0) * exp(-pow((r - 0.42) * 22.0, 2.0)) * 0.05;
+  // Ghosts: positions along the sun-centre axis, radius, colour.
+  let ghosts = array(
+    vec4f(0.45, 0.05, 1.0, 0.7), vec4f(-0.25, 0.08, 0.6, 0.9), vec4f(-0.55, 0.035, 0.9, 1.0),
+    vec4f(-0.9, 0.14, 0.5, 0.6), vec4f(-1.3, 0.06, 1.0, 0.5));
+  let tints = array(vec3f(1.0, 0.6, 0.3), vec3f(0.4, 0.8, 1.0), vec3f(0.9, 0.5, 1.0), vec3f(0.5, 1.0, 0.6), vec3f(1.0, 0.8, 0.4));
+  for (var i = 0; i < 5; i++) {
+    let g = ghosts[i];
+    let gd = length((p - u.sunScreen * g.x) * a);
+    let disc = smoothstep(g.y, g.y * 0.6, gd) * g.z * 0.06;
+    c += tints[i] * disc;
+  }
+  return c * u.flare;
+}
 
 // The light at a surface point: direction toward it, distance, and how much of it arrives (cone x falloff).
 struct LightHit {
@@ -290,6 +320,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   // Sun shafts: only in the open air beyond the cave mouth, so they never veil the near walls.
   let air = smoothstep(u.far * 0.02, u.far * 0.12, z);
   color += u.lightColor * (u.rays * air * textureSampleLevel(raysTex, samp, uv, 0.0).r);
+  if (u.flare > 0.0) { color += lensFlare(frag.xy) * u.lightColor; }
 
   // Brightness cap on luminance, keeping hue, so stacked lights roll off instead of clipping to white.
   let lum = dot(color, vec3f(0.2126, 0.7152, 0.0722));
