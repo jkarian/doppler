@@ -64,6 +64,18 @@ makes sense, crisp laser cores that pop from their glow, additive laser light, p
 - Bliss (first track) loses its first drop's sun with the intensity-based gate. Low priority.
 - Old spotlight mode isn't graph-driven.
 
+## Research (2026-10-03, overnight)
+
+- [research-camera-mapping.md](research-camera-mapping.md): single image to layered 3D. Tested on the canyon:
+  MoGe-2/3 beats our depth (and is MIT); Apple SHARP fills disocclusion perfectly but is research-only;
+  a home-made 2-layer LDI with inpainting is the recommended fix; World Labs Marble for full scenes.
+  Licence warning: Depth Anything V2 Base/Large are non-commercial.
+- [research-music-understanding.md](research-music-understanding.md): tested on our tracks. Our downbeats
+  are fine; our beat grid wobbles (up to about ±130 ms) and section boundaries miss the bar lines. Recommended:
+  HTDemucs stems -> Beat This! grid -> All-In-One/SongFormer boundaries voted onto an 8-bar phrase grid ->
+  our own stem-based drop/build labels -> tension, energy and anticipation curves. Bliss needs a no-grid mode.
+- Test scripts, outputs and Windows workarounds for both are kept locally in `captures/research/`.
+
 ## Backlog / ideas
 
 1. Head tracking: webcam face/eye tracking (e.g. MediaPipe in the browser) moving the camera for real
