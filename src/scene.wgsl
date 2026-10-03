@@ -424,7 +424,10 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   let zmin = min(min(d00, d10), min(d01, d11));
   let zmax = max(max(d00, d10), max(d01, d11));
   let silhouette = zmax > zmin * 1.08;
-  let z = select(depthAt(uv), zmax, silhouette);
+  // Without a background layer, the square moves to the far side's depth: crisp edges, but it detaches from
+  // its near neighbours and cracks open (dark dots) when the camera moves. With one, the square stays a
+  // continuous stretched surface (no cracks), pushed back behind the hidden rock below.
+  let z = select(depthAt(uv), zmax, silhouette && u.up.w < 0.5);
 
   let pc = viewPos(uv, z) - u.camPos;
   let tanXY = vec2f(u.tanHalfFov * u.aspect, u.tanHalfFov);
