@@ -241,7 +241,11 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       let ee = dot(d, w0);
       let denom = max(1.0 - bb * bb, 1e-6);
       let s = clamp((ee - bb * dd) / denom, 0.0, b.w);
-      let t = clamp(dot(o + s * d - cam, v), 0.0, viewLen);
+      let tRaw = dot(o + s * d - cam, v);
+      let t = clamp(tRaw, 0.0, viewLen);
+      // Rock in front hides the beam: no glow where it passes behind the surface this pixel sees, so a
+      // beam going behind a wall is cut off at the wall's edge (2% slack for where it lands on the rock).
+      let seen = 1.0 - smoothstep(viewLen, viewLen * 1.02, tRaw);
       let gap = distance(cam + t * v, o + s * d);
       let ang = gap / max(t, 0.05);
       // Physical thickness: thinner on screen the further away the closest point is.
@@ -276,7 +280,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       // Level set so the core lands near full white and the glow stays below it: if both clipped to
       // white they'd merge into one soft band.
       // Beams in the air don't depend on the depth map, so `reach` doesn't cut them; they only dim with distance.
-      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t);
+      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * seen;
       // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
       if (db.w < 0.0) {
         let to = dot(o - cam, v);

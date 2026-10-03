@@ -97,9 +97,10 @@ Output nodes write the renderer's parameters. Anything a graph doesn't set keeps
 
 | Node | Inputs |
 |---|---|
-| Sun | `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
+| Sun | `maxArc` soft ceiling (degrees; eases in over the last 6), `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
 | Camera | `swayX`, `swayY`, `pushZ` in units of the display's sway amount (pushZ is clamped to ≥ 0) |
 | Tone | `baseDim`, `baked`, `cap` |
+| Sync | `lead` (ms, positive = visuals earlier than the audio; keys `{ }` on the display) |
 | NookLights | `positions` (u,v[,area,brightness]; ...), `sounds` (names, `|`-separated, fire the mid and far lights), `pattern`, `seed`, `attack`, `decay`, `near` (feet: nearer lights wait for big moments), `moments` (drops and/or phrases), `nearDecay`, `radius` (feet; each light can scale its area and brightness: `u,v,area,brightness`), `standoff`, `color`, `intensity`, `level` |
 
 Sun, Laser, SkyLaser and Scan also take `level` (0..1, default 1), which scales them. A `Setup` node's `level`

@@ -100,7 +100,8 @@ async function main() {
     audio.preload = "auto";
   }
   // Audio/video offset for this setup (speaker and TV lag): visuals run this far ahead of the audio.
-  let avOffset = Number(safeGet("doppler.avOffset") ?? 0) || 0;
+  // Visuals vs audio: the graph's Sync node (lead, ms; positive = visuals earlier). Set once the graph loads.
+  let visualLead = () => 0;
   const { width: W, height: H } = info;
   if (depth.length !== W * H) fail(`depth.bin has ${depth.length} values, expected ${W * H}`);
 
@@ -396,6 +397,7 @@ async function main() {
   // Real-world distance of a picture point, for nodes that treat near and far differently.
   const depthFeet = (u: number, v: number) => depthAt(u, v) * (15840 / pct(0.95));
   const runtime = new GraphRuntime((await graphRes.json()) as Graph, { music, scene: { gapHorizon, depthFeet } });
+  visualLead = () => Number(runtime.graph.nodes.find((n) => n.type === "Sync")?.params?.lead ?? 0) / 1000;
   const channel = new BroadcastChannel("doppler");
   channel.onmessage = (e: MessageEvent) => {
     const msg = e.data;
@@ -407,7 +409,7 @@ async function main() {
         music,
         runtime,
         time: () => time,
-        seek: (t) => (audio.currentTime = Math.max(0, t - avOffset)),
+        seek: (t) => (audio.currentTime = Math.max(0, t - visualLead())),
         edited: (graph) => channel.postMessage({ type: "graph", graph, name: graphName, from: "display", edit: true }),
         save: async () => {
           const res = await fetch(`/graph?name=${encodeURIComponent(graphName)}`, { method: "POST", body: JSON.stringify(runtime.graph, null, 1) });
@@ -501,23 +503,39 @@ async function main() {
   };
 
   // --- Input ------------------------------------------------------------------
-  // Nook light placement (N): click adds a light at that spot in the picture, shift- or right-click removes
-  // the nearest. Edits the graph's NookLights node (and reaches the editor); all lights show while placing.
-  let nookPlacing = false;
-  const nookNode = () => runtime.graph.nodes.find((n) => n.type === "NookLights");
-  const nookPoints = () =>
-    String(nookNode()?.params?.positions ?? "")
+  // Placement (N): put each module's fixtures on the rock by hand. Tab switches module.
+  //   Nook lights: drag a ring to move it, scroll over it for its area, shift+scroll for its brightness.
+  //   Laser rigs: drag the ring to move the rig, drag its diamond to aim it, scroll over the ring for the
+  //   search cone it re-aims within.
+  //   Both: click empty rock to add, shift- or right-click to remove the nearest, Delete clears them all.
+  // Edits go into the graph's nodes (and reach the editor); save with the monitor (G). Everything in the
+  // module shows while placing.
+  type Module = "nooks" | "rigs";
+  const MODULES: Module[] = ["nooks", "rigs"];
+  const MODULE_NAME: Record<Module, string> = { nooks: "NOOK LIGHTS", rigs: "LASER RIGS" };
+  let placing: Module | null = null;
+  let lastModule: Module = "nooks";
+  const moduleNode = (m: Module) =>
+    m === "nooks"
+      ? runtime.graph.nodes.find((n) => n.type === "NookLights")
+      : runtime.graph.nodes.find((n) => n.type === "SkyLaser" && Number(n.params?.from ?? 0) >= 0.5);
+  const PARAM: Record<Module, string> = { nooks: "positions", rigs: "rigs" };
+  // Points: nook lights [u, v, area, brightness]; rigs [u, v, aim u, aim v, cone degrees].
+  const readPoints = (m: Module): number[][] =>
+    String(moduleNode(m)?.params?.[PARAM[m]] ?? "")
       .split(";")
       .map((q) => q.split(",").map(Number))
-      .filter((q) => q.length >= 2 && q.length <= 4 && q.every(Number.isFinite))
-      .map(([u, v, r = 1, b = 1]) => [u, v, r, b]);
-  // final = false while dragging: update the picture only; tell the editor and monitor on release.
-  const setNookPoints = (pts: number[][], final = true) => {
-    const node = nookNode();
+      .filter((q) => q.length >= 2 && q.every(Number.isFinite))
+      .map((q) => (m === "nooks" ? [q[0], q[1], q[2] ?? 1, q[3] ?? 1] : [q[0], q[1], q[2] ?? q[0], q[3] ?? q[1] - 0.25, q[4] ?? 30]));
+  const fmtPoint = (m: Module, q: number[]) =>
+    m === "nooks"
+      ? [q[0].toFixed(4), q[1].toFixed(4), ...(q[2] !== 1 || q[3] !== 1 ? [q[2].toFixed(2), q[3].toFixed(2)] : [])].join(",")
+      : [...q.slice(0, 4).map((x) => x.toFixed(4)), q[4].toFixed(1)].join(",");
+  // final = false while dragging or scrolling: update the picture only; tell the editor and monitor after.
+  const writePoints = (m: Module, pts: number[][], final = true) => {
+    const node = moduleNode(m);
     if (!node) return;
-    // u,v and, when not 1, this light's area and brightness multipliers.
-    const fmtPt = ([u, v, r, b]: number[]) => [u.toFixed(4), v.toFixed(4), ...(r !== 1 || b !== 1 ? [r.toFixed(2), b.toFixed(2)] : [])].join(",");
-    node.params = { ...node.params, positions: pts.map(fmtPt).join("; ") };
+    node.params = { ...node.params, [PARAM[m]]: pts.map((q) => fmtPoint(m, q)).join("; ") };
     runtime.load(runtime.graph);
     if (!final) return;
     channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
@@ -530,68 +548,129 @@ async function main() {
       ((1 - (1 - v * 2 - cam.center[1] + c[1] / (pivotZ * tanHalfFov)) * viewScale[1]) / 2) * innerHeight,
     ];
   };
-  let nookDrag = -1; // index of the light being dragged
-  let nookHover = -1; // index of the light under the pointer (scroll adjusts it)
-  const nookAt = (x: number, y: number, within = 24) => {
-    const near = nookPoints().map(([u, v]) => uvToScreen(u, v)).map(([px, py]) => Math.hypot(px - x, py - y));
-    const i = near.indexOf(Math.min(...near));
-    return i >= 0 && near[i] < within ? i : -1;
+  const project3 = (p: Vec3): [number, number] => [(p[0] / (p[2] * tanHalfFov * aspect)) * 0.5 + 0.5, 0.5 - (p[1] / (p[2] * tanHalfFov)) * 0.5];
+  // A rig stands just in front of the rock at its spot; it aims at the scene point under its aim handle.
+  const rigOrigin = (u: number, v: number) => viewPos(u, v, depthAt(u, v) * 0.985);
+  const rigAim = (q: number[]) => {
+    const o = rigOrigin(q[0], q[1]);
+    const t = viewPos(q[2], q[3]);
+    const d: Vec3 = [t[0] - o[0], t[1] - o[1], t[2] - o[2]];
+    return { o, d: normalize(d), len: Math.hypot(d[0], d[1], d[2]) };
   };
-  let nookWheelTimer = 0;
-  // Numbered markers on each light while placing (a light behind rock may show no pool to click near).
-  const nookMarkers = document.createElement("div");
-  nookMarkers.style.cssText = "position:fixed;inset:0;pointer-events:none;font:600 12px system-ui,sans-serif";
-  document.body.append(nookMarkers);
-  const drawNookMarkers = () => {
-    if (!nookPlacing) return void (nookMarkers.innerHTML = "");
-    const feet = Number(nookNode()?.params?.radius ?? 800) || 800;
-    const nearFeet = Number(nookNode()?.params?.near ?? 8000);
-    nookMarkers.innerHTML = nookPoints()
-      .map(([u, v, r, b], i) => {
+  const coneBasis = (d: Vec3): [Vec3, Vec3] => {
+    let e1 = normalize(cross([0, 1, 0], d));
+    if (!Number.isFinite(e1[0])) e1 = [1, 0, 0];
+    return [e1, cross(d, e1)];
+  };
+
+  type Grab = { i: number; handle: "point" | "aim" };
+  let grab: Grab | null = null;
+  let hover: Grab | null = null;
+  const hitTest = (m: Module, x: number, y: number, within = 18): Grab | null => {
+    let best: Grab | null = null;
+    let bd = within;
+    readPoints(m).forEach((q, i) => {
+      const handles: [Grab["handle"], number, number][] = [["point", q[0], q[1]]];
+      if (m === "rigs") handles.push(["aim", q[2], q[3]]);
+      for (const [handle, u, v] of handles) {
+        const [sx, sy] = uvToScreen(u, v);
+        const d = Math.hypot(sx - x, sy - y);
+        if (d < bd) (bd = d), (best = { i, handle });
+      }
+    });
+    return best;
+  };
+  let wheelTimer = 0;
+
+  const markers = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  markers.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;font:600 12px system-ui,sans-serif";
+  document.body.append(markers);
+  const drawMarkers = () => {
+    if (!placing) return void (markers.innerHTML = "");
+    const m = placing;
+    const pts = readPoints(m);
+    const isOn = (i: number, h: Grab["handle"]) => (grab?.i === i && grab.handle === h) || (hover?.i === i && hover.handle === h);
+    let svg = "";
+    const label = (x: number, y: number, text: string, color: string) =>
+      `<text x="${x}" y="${y}" fill="${color}" font-size="11" paint-order="stroke" stroke="#000" stroke-width="3">${text}</text>`;
+    const ring = (x: number, y: number, n: number, color: string) =>
+      `<circle cx="${x}" cy="${y}" r="9" fill="rgba(0,0,0,0.35)" stroke="${color}" stroke-width="2"/>` +
+      `<text x="${x}" y="${y + 4}" fill="${color}" text-anchor="middle" paint-order="stroke" stroke="#000" stroke-width="3">${n}</text>`;
+    if (m === "nooks") {
+      const feet = Number(moduleNode(m)?.params?.radius ?? 800) || 800;
+      const nearFeet = Number(moduleNode(m)?.params?.near ?? 8000);
+      pts.forEach(([u, v, r, b], i) => {
         const [x, y] = uvToScreen(u, v);
         // Near lights (kept for big moments) in blue, mid and far ones (on the sounds) in amber.
-        const ring = i === nookDrag || i === nookHover ? "#fff" : depthFeet(u, v) < nearFeet ? "#8fc8ff" : "#ffd27a";
+        const color = isOn(i, "point") ? "#fff" : depthFeet(u, v) < nearFeet ? "#8fc8ff" : "#ffd27a";
         // The area of effect as it appears on screen: the pool's real radius at the light's distance.
-        const px = ((feet / feetPerUnit) * r) / (depthAt(u, v) * tanHalfFov) * viewScale[1] * (innerHeight / 2);
-        const tag = r !== 1 || b !== 1 ? `<div style="position:absolute;left:${x + 12}px;top:${y - 7}px;color:${ring};font-size:11px;white-space:nowrap;text-shadow:0 0 3px #000">area ${Math.round(r * 100)}% · bright ${Math.round(b * 100)}%</div>` : "";
-        return (
-          `<div style="position:absolute;left:${x - px}px;top:${y - px}px;width:${2 * px}px;height:${2 * px}px;border:1px dashed ${ring};border-radius:50%;opacity:0.45"></div>` +
-          `<div style="position:absolute;left:${x - 10}px;top:${y - 10}px;width:18px;height:18px;border:2px solid ${ring};border-radius:50%;color:${ring};text-align:center;line-height:18px;text-shadow:0 0 3px #000">${i + 1}</div>` +
-          tag
-        );
-      })
-      .join("");
+        const px = (((feet / feetPerUnit) * r) / (depthAt(u, v) * tanHalfFov)) * viewScale[1] * (innerHeight / 2);
+        svg += `<circle cx="${x}" cy="${y}" r="${px}" fill="none" stroke="${color}" stroke-dasharray="4 4" opacity="0.45"/>`;
+        svg += ring(x, y, i + 1, color);
+        if (r !== 1 || b !== 1) svg += label(x + 13, y + 4, `area ${Math.round(r * 100)}% · bright ${Math.round(b * 100)}%`, color);
+      });
+    } else {
+      pts.forEach((q, i) => {
+        const { o, d, len } = rigAim(q);
+        const [e1, e2] = coneBasis(d);
+        const half = (q[4] / 2) * rad;
+        const color = isOn(i, "point") || isOn(i, "aim") ? "#fff" : "#ff7a6b";
+        const [x, y] = uvToScreen(q[0], q[1]);
+        const [ax, ay] = uvToScreen(q[2], q[3]);
+        // The search cone: its rim at the aim distance, and lines out to it.
+        const rim: number[][] = [];
+        for (let k = 0; k <= 32; k++) {
+          const ph = (2 * Math.PI * k) / 32;
+          const dir = d.map((x0, j) => x0 * Math.cos(half) + (e1[j] * Math.cos(ph) + e2[j] * Math.sin(ph)) * Math.sin(half));
+          const p: Vec3 = [o[0] + dir[0] * len, o[1] + dir[1] * len, o[2] + dir[2] * len];
+          if (p[2] > 0.05) rim.push(uvToScreen(...project3(p)));
+        }
+        if (rim.length > 2) {
+          svg += `<polyline points="${rim.map((p) => p.join(",")).join(" ")}" fill="rgba(255,122,107,0.08)" stroke="${color}" stroke-dasharray="4 4" opacity="0.6"/>`;
+          for (const p of [rim[0], rim[Math.floor(rim.length / 2)]]) {
+            svg += `<line x1="${x}" y1="${y}" x2="${p[0]}" y2="${p[1]}" stroke="${color}" stroke-dasharray="4 4" opacity="0.5"/>`;
+          }
+        }
+        svg += `<line x1="${x}" y1="${y}" x2="${ax}" y2="${ay}" stroke="${color}" stroke-width="1.5" opacity="0.8"/>`;
+        svg += `<rect x="${ax - 6}" y="${ay - 6}" width="12" height="12" transform="rotate(45 ${ax} ${ay})" fill="rgba(0,0,0,0.4)" stroke="${color}" stroke-width="2"/>`;
+        svg += ring(x, y, i + 1, color);
+        svg += label(x + 13, y + 4, `cone ${Math.round(q[4])}°`, color);
+      });
+    }
+    const how =
+      m === "nooks"
+        ? "drag a ring to move · scroll: area · shift+scroll: brightness"
+        : "drag the ring to move · drag the diamond to aim · scroll over the ring: search cone";
+    svg +=
+      `<text x="50%" y="28" text-anchor="middle" fill="#fff" font-size="14" paint-order="stroke" stroke="#000" stroke-width="4">` +
+      `PLACING ${MODULE_NAME[m]} (Tab: switch) · ${how} · click: add · shift/right-click: remove · Delete: clear · N: done · save in G</text>`;
+    markers.innerHTML = svg;
   };
-  // Grab a ring and drag to move that light; click empty rock to add one.
-  const placeNook = (e: PointerEvent) => {
-    if (!nookNode()) return;
-    const pts = nookPoints();
+  const placeAt = (e: PointerEvent) => {
+    const m = placing!;
+    if (!moduleNode(m)) return;
+    const pts = readPoints(m);
     if (!e.shiftKey && e.button === 0) {
-      const i = nookAt(e.clientX, e.clientY, 18);
-      if (i >= 0) {
-        nookDrag = i;
+      const hit = hitTest(m, e.clientX, e.clientY);
+      if (hit) {
+        grab = hit;
         canvas.setPointerCapture(e.pointerId);
         return;
       }
     }
     const [u, v] = toImageUv(e);
     if (e.shiftKey || e.button === 2) {
-      let best = -1;
-      let bd = Infinity;
-      pts.forEach((q, i) => {
-        const d = Math.hypot((q[0] - u) * aspect, q[1] - v);
-        if (d < bd) (bd = d), (best = i);
-      });
-      if (best >= 0 && bd < 0.06) pts.splice(best, 1);
-    } else pts.push([u, v, 1, 1]);
-    setNookPoints(pts);
+      const hit = hitTest(m, e.clientX, e.clientY, 60);
+      if (hit) pts.splice(hit.i, 1);
+    } else pts.push(m === "nooks" ? [u, v, 1, 1] : [u, v, u, Math.max(0, v - 0.25), 30]);
+    writePoints(m, pts);
   };
 
   let dragging: "target" | "source" | null = null;
   let last = [0, 0];
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
-    if (nookPlacing) return placeNook(e);
+    if (placing) return placeAt(e);
     canvas.setPointerCapture(e.pointerId);
     dragging = e.button === 2 ? "source" : "target";
     last = [e.clientX, e.clientY];
@@ -599,14 +678,17 @@ async function main() {
   });
   canvas.addEventListener("pointerup", () => {
     dragging = null;
-    if (nookDrag >= 0) (nookDrag = -1), setNookPoints(nookPoints());
+    if (grab && placing) (grab = null), writePoints(placing, readPoints(placing));
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (nookPlacing) nookHover = nookAt(e.clientX, e.clientY);
-    if (nookDrag >= 0) {
-      const pts = nookPoints();
-      pts[nookDrag] = [...toImageUv(e), pts[nookDrag][2], pts[nookDrag][3]];
-      return setNookPoints(pts, false);
+    if (placing) hover = hitTest(placing, e.clientX, e.clientY);
+    if (grab && placing) {
+      const pts = readPoints(placing);
+      const [u, v] = toImageUv(e);
+      const q = pts[grab.i];
+      if (grab.handle === "aim") (q[2] = u), (q[3] = v);
+      else (q[0] = u), (q[1] = v);
+      return writePoints(placing, pts, false);
     }
     if (dragging === "target") aimAt(e);
     if (dragging === "source") {
@@ -644,16 +726,18 @@ async function main() {
       e.preventDefault();
       // Shift+wheel arrives as sideways scrolling in some browsers (Chrome on Windows).
       const k = Math.exp(-(e.deltaY || e.deltaX) * 0.001);
-      // Placing nook lights: scroll over a ring for its area, shift+scroll for its brightness.
-      if (nookPlacing) {
-        const i = nookAt(e.clientX, e.clientY, 40);
-        if (i < 0) return;
-        const pts = nookPoints();
-        const j = e.shiftKey ? 3 : 2;
-        pts[i][j] = clamp(pts[i][j] * k, 0.1, 10);
-        setNookPoints(pts, false);
-        clearTimeout(nookWheelTimer);
-        nookWheelTimer = window.setTimeout(() => setNookPoints(nookPoints()), 300);
+      // Placing: nook lights' area (shift: brightness), or a rig's search cone.
+      if (placing) {
+        const m = placing;
+        const hit = hitTest(m, e.clientX, e.clientY, 40);
+        if (!hit) return;
+        const pts = readPoints(m);
+        const q = pts[hit.i];
+        if (m === "nooks") q[e.shiftKey ? 3 : 2] = clamp(q[e.shiftKey ? 3 : 2] * k, 0.1, 10);
+        else q[4] = clamp(q[4] * k, 2, 120);
+        writePoints(m, pts, false);
+        clearTimeout(wheelTimer);
+        wheelTimer = window.setTimeout(() => writePoints(m, readPoints(m)), 300);
         return;
       }
       if (e.shiftKey) look.intensity = clamp(look.intensity * k, 0.05, 50);
@@ -688,8 +772,11 @@ async function main() {
     else if (key === "e") window.open(`editor.html?graph=${graphName}`, "doppler-editor");
     else if (key === "b") benchmark();
     else if (key === "g") monitor?.toggle();
-    else if (key === "n") nookPlacing = !nookPlacing;
-    else if (nookPlacing && (e.key === "Delete" || e.key === "Backspace")) setNookPoints([]);
+    else if (key === "n") placing = placing ? null : lastModule;
+    else if (placing && e.key === "Tab") {
+      e.preventDefault();
+      placing = lastModule = MODULES[(MODULES.indexOf(placing) + 1) % MODULES.length];
+    } else if (placing && (e.key === "Delete" || e.key === "Backspace")) writePoints(placing, []);
     else if (key === "t") look.sun = !look.sun;
     else if (key === "1") look.flare = clamp(look.flare / 1.25, 0, 5);
     else if (key === "2") look.flare = clamp(look.flare * 1.25 || 0.05, 0, 5);
@@ -706,9 +793,13 @@ async function main() {
     else if (music && key === "l") audio.currentTime = Math.min(music.a.duration, audio.currentTime + 5);
     else if (music && key === "a") autoLight = !autoLight;
     else if (key === "{" || key === "}") {
-      avOffset += (key === "}" ? 1 : -1) * (e.altKey ? 0.001 : 0.01);
-      avOffset = Math.round(avOffset * 1000) / 1000;
-      safeSet("doppler.avOffset", String(avOffset));
+      // Adjusts the Sync node (made if the graph has none), so the offset is saved with the graph.
+      let node = runtime.graph.nodes.find((n) => n.type === "Sync");
+      if (!node) runtime.graph.nodes.push((node = { id: "sync", type: "Sync", name: "Sync (visual lead)", params: { lead: 0 }, pos: [40, 40] }));
+      node.params = { ...node.params, lead: Math.round(Number(node.params?.lead ?? 0) + (key === "}" ? 1 : -1) * (e.altKey ? 1 : 10)) };
+      runtime.load(runtime.graph);
+      channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
+      monitor?.graphChanged();
     }
   });
 
@@ -839,6 +930,24 @@ async function main() {
   // Aims that run into the rock right away are re-rolled. A negative sheet field marks the beam's
   // start as a visible rig for the shader.
   const groundRigs = (S: NonNullable<RenderOut["skyLasers"]>[number], li: number, step: number, maxLen: number) => {
+    if (S.rigs?.length) {
+      S.rigs.slice(0, 24).forEach((q, bi) => {
+        const { o, d: aim } = rigAim(q);
+        let d = aim;
+        if (placing !== "rigs") {
+          // A random direction inside the cone (even over its area), new each step, swaying a little while lit.
+          const r = seeded(S.seed * 104729 + step * 131 + bi * 17);
+          const phase = 2 * Math.PI * (S.driftSpeed * S.t) + bi * 1.7;
+          const half = (q[4] / 2) * rad;
+          const th = clamp(half * Math.sqrt(r()) + S.drift * rad * 0.5 * Math.sin(phase), 0, half);
+          const ph = 2 * Math.PI * r() + 0.3 * Math.sin(phase * 0.7 + 1.1);
+          const [e1, e2] = coneBasis(aim);
+          d = normalize(aim.map((x, j) => x * Math.cos(th) + (e1[j] * Math.cos(ph) + e2[j] * Math.sin(ph)) * Math.sin(th)) as Vec3);
+        }
+        laserData.set([...o, beamLength(o, d, maxLen), ...d, -1], beamSlot(li, bi));
+      });
+      return;
+    }
     for (let bi = 0; bi < S.count; bi++) {
       const place = seeded(S.seed * 7919 + bi * 31);
       let u = 0.5;
@@ -902,12 +1011,15 @@ async function main() {
     // Sky lasers: beams from high above onto seeded random spots on the rock, new spots per trigger step.
     let used = n;
     for (const S of sky) {
+      const showRigs = placing === "rigs" && S.from === 1;
+      if (S.intensity <= 0 && !showRigs) continue; // switched off (its setup is out)
       if (used >= 4) break;
       const li = used++;
       const step = Math.floor(S.trigger);
-      const brightness = S.intensity * Math.exp(-(S.trigger - step) * S.fade);
+      const brightness = showRigs ? Math.max(1, S.intensity) : S.intensity * Math.exp(-(S.trigger - step) * S.fade);
       const height = info.far * 0.6;
-      laserData.set([0, 0, 0, S.count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
+      const count = S.from === 1 && S.rigs?.length ? Math.min(24, S.rigs.length) : S.count;
+      laserData.set([0, 0, 0, count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
       if (S.from === 1) {
         groundRigs(S, li, step, maxLen);
         continue;
@@ -943,7 +1055,7 @@ async function main() {
   // Placement mode (N) shows them all.
   const writeNooks = (N: RenderOut["nooks"]) => {
     nookData.fill(0);
-    const all = (N?.lights ?? []).map((l) => (nookPlacing ? { ...l, level: 0.6 } : l));
+    const all = (N?.lights ?? []).map((l) => (placing === "nooks" ? { ...l, level: 0.6 } : l));
     const lit = all.filter((l) => l.level > 0.002).sort((a, b) => b.level - a.level).slice(0, 8);
     lit.forEach((l, i) => {
       const z = depthAt(l.u, l.v);
@@ -1012,11 +1124,11 @@ async function main() {
 
   const frame = (now: number) => {
     if (recording) return requestAnimationFrame(frame);
-    time = music ? audio.currentTime + avOffset : now / 1000;
+    time = music ? audio.currentTime + visualLead() : now / 1000;
     draw();
     sendValues(now);
     monitor?.update(time);
-    drawNookMarkers();
+    drawMarkers();
     if (!hud.hidden && !recording) {
       const look = animatedLook(time); // what's actually on screen, after the graph
       hud.textContent =
@@ -1037,9 +1149,13 @@ async function main() {
     const sec = music.section(time);
     return (
       `${trackName}  ${audio.paused ? "paused" : "playing"}  ${time.toFixed(2)} s  bar ${music.bar(time).toFixed(2)}  ` +
-`${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
+`${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  visual lead ${(visualLead() * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
       `space play · J L seek · { } offset · A auto light · G music monitor · N place nook lights\n` +
-      (nookPlacing ? `PLACING NOOK LIGHTS: drag a ring to move it · scroll over it: area, shift+scroll: brightness · click to add · shift/right-click to remove · Delete clears all · N when done · Save in the monitor (G)\n` : "")
+      (placing
+        ? `PLACING ${MODULE_NAME[placing]} (Tab: switch) · ` +
+          (placing === "nooks" ? `drag a ring to move · scroll: area · shift+scroll: brightness` : `drag the ring to move · drag the diamond to aim · scroll: search cone`) +
+          ` · click to add · shift/right-click to remove · Delete clears all · N when done · Save in the monitor (G)\n`
+        : "")
     );
   };
   requestAnimationFrame(frame);

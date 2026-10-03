@@ -56,6 +56,7 @@ export interface SkyLaserOut {
   color: number[];
   intensity: number;
   hit: number;
+  rigs?: number[][]; // ground rigs placed by hand: [u, v, aim u, aim v, cone degrees]; empty = seeded random spots
 }
 
 export interface LaserOut {
@@ -133,6 +134,11 @@ export interface NodeDef {
 const num = (v: Value): number => (typeof v === "number" ? v : Array.isArray(v) ? v[0] ?? 0 : Number(v) || 0);
 const vec = (v: Value): number[] => (Array.isArray(v) ? v : [num(v), num(v), num(v)]);
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
+/** Like min(x, ceiling), but x slows and eases into the ceiling over the last `knee` instead of stopping dead. */
+const softCeiling = (x: number, ceiling: number, knee: number) => {
+  const start = ceiling - knee;
+  return x <= start ? x : ceiling - knee * Math.exp(-(x - start) / knee);
+};
 
 const defs: NodeDef[] = [
   // --- Music ------------------------------------------------------------------------------
@@ -555,13 +561,14 @@ const defs: NodeDef[] = [
       { name: "flare", default: 0.8 },
       { name: "skyBoost", default: 0 },
       { name: "enabled", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "maxArc", default: 180, min: 0, max: 180, step: 0.5, doc: "degrees: the sun never goes higher (low enough, it lights only the walls). It eases into this ceiling over the last 6 degrees instead of stopping dead." },
       { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
     outputs: [],
     eval: (i, ctx) => {
       const k = clamp(num(i.level), 0, 1);
       ctx.out.sun = {
-        on: num(i.enabled) > 0.5 && k > 0.001, arc: num(i.arc), azimuth: num(i.azimuth), intensity: Math.max(0, num(i.intensity)) * k,
+        on: num(i.enabled) > 0.5 && k > 0.001, arc: softCeiling(num(i.arc), num(i.maxArc), 6), azimuth: num(i.azimuth), intensity: Math.max(0, num(i.intensity)) * k,
         color: vec(i.color), rays: Math.max(0, num(i.rays)) * k, flare: Math.max(0, num(i.flare)) * k, skyBoost: num(i.skyBoost) * k,
       };
       return {};
@@ -623,7 +630,9 @@ const defs: NodeDef[] = [
       "Scattered lasers. from 0 (sky): count straight beams come down onto random spots on the rock, new spots each " +
       "time floor(trigger) changes; sheet 1 makes them vertical curtains. from 1 (ground): count laser rigs sit at fixed " +
       "random spots on the rock and each fires a beam in a random direction (elevation elevMin-elevMax), re-aimed each " +
-      "trigger step. The same track always gives the same choices. Shares the 4-fixture limit with Laser.",
+      "trigger step. The same track always gives the same choices. Shares the 4-fixture limit with Laser. " +
+      "rigs (ground): rigs placed by hand (N on the display, Tab to laser rigs), u,v,aim u,aim v,cone; ... Each re-aims at random " +
+      "within its cone (degrees) around its aim point every trigger step. Empty: rigs at seeded random spots.",
     inputs: [
       { name: "from", default: 0, kind: "const", min: 0, max: 1, step: 1, doc: "0 sky, 1 ground rigs" },
       { name: "elevMin", default: 15, min: -30, max: 89, step: 1, doc: "ground: lowest aim, degrees up" },
@@ -631,6 +640,7 @@ const defs: NodeDef[] = [
       { name: "trigger", default: 0, step: 1 },
       { name: "count", default: 4, min: 1, max: 24, step: 1 },
       { name: "seed", default: 1, kind: "const", step: 1 },
+      { name: "rigs", default: "", kind: "const" },
       { name: "uMin", default: 0.2, min: 0, max: 1, step: 0.01 },
       { name: "uMax", default: 0.8, min: 0, max: 1, step: 0.01 },
       { name: "vMin", default: 0.3, min: 0, max: 1, step: 0.01 },
@@ -652,9 +662,15 @@ const defs: NodeDef[] = [
     ],
     outputs: [],
     eval: (i, ctx) => {
-      const intensity = num(i.intensity) * clamp(num(i.level), 0, 1);
-      if (intensity <= 0) return {};
+      // Pushed even when off (intensity 0): the display skips it, except to show rigs while placing them.
+      const intensity = Math.max(0, num(i.intensity) * clamp(num(i.level), 0, 1));
+      const rigs = String(i.rigs ?? "")
+        .split(";")
+        .map((q) => q.split(",").map(Number))
+        .filter((q) => q.length >= 2 && q.every(Number.isFinite))
+        .map(([u, v, tu = u, tv = v - 0.25, cone = 30]) => [u, v, tu, tv, cone]);
       (ctx.out.skyLasers ??= []).push({
+        rigs,
         from: num(i.from) > 0.5 ? 1 : 0, elevMin: num(i.elevMin), elevMax: Math.max(num(i.elevMin), num(i.elevMax)),
         count: Math.round(clamp(num(i.count), 1, 24)), trigger: num(i.trigger), seed: num(i.seed),
         uMin: num(i.uMin), uMax: num(i.uMax), vMin: num(i.vMin), vMax: num(i.vMax), minDepth: Math.max(0, num(i.minDepth)), tilt: Math.max(0, num(i.tilt)),
@@ -802,6 +818,17 @@ const defs: NodeDef[] = [
       };
       return {};
     },
+  },
+  {
+    type: "Sync",
+    category: "Output",
+    doc:
+      "Shifts all the visuals against the audio: lead in milliseconds, positive = visuals earlier. Use it if lights land a " +
+      "little after (or before) what you hear: speakers, TVs and Bluetooth add delay. Keys { } on the display change it " +
+      "(10 ms; alt: 1 ms).",
+    inputs: [{ name: "lead", default: 0, kind: "const", min: -500, max: 500, step: 1, doc: "ms: positive = visuals earlier" }],
+    outputs: [],
+    eval: () => ({}),
   },
   {
     type: "Tone",
