@@ -212,6 +212,11 @@ async function main() {
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
   const UNIFORM_FLOATS = 44;
+  // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
+  const LASER_FLOATS = 4 + 4 * 24 + 96 * 4;
+  const laserData = new Float32Array(LASER_FLOATS);
+  const laserCount = new Uint32Array(laserData.buffer, 0, 1);
+  const laserBuf = device.createBuffer({ size: LASER_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const uniforms = new Float32Array(UNIFORM_FLOATS);
   const uniformBuf = device.createBuffer({ size: UNIFORM_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const bindGroup = device.createBindGroup({
@@ -228,6 +233,7 @@ async function main() {
       { binding: 5, resource: photoTex.createView() },
       { binding: 6, resource: shadowA.createView() },
       { binding: 7, resource: raysTex.createView() },
+      { binding: 8, resource: { buffer: laserBuf } },
     ],
   });
   const raysBind = device.createBindGroup({
@@ -593,6 +599,7 @@ async function main() {
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
+    writeLasers(graphOut.lasers ?? []);
 
     const enc = device.createCommandEncoder();
     // march -> A, blur A -> B (horizontal), blur B -> A (vertical); the main pass reads A.
@@ -617,6 +624,69 @@ async function main() {
     pass.draw(grid[0] * grid[1] * 6);
     pass.end();
     device.queue.submit([enc.finish()]);
+  };
+
+  // Lasers: origin, fan basis, and each beam's length to the first rock it hits (marched through the
+  // depth map, the same "solid behind the surface" rule as the sun's shadows).
+  const rad = Math.PI / 180;
+  const beamLength = (o: Vec3, d: Vec3, maxLen: number): number => {
+    const steps = 160;
+    let prev = 0;
+    for (let k = 1; k <= steps; k++) {
+      const s = maxLen * (k / steps) ** 2;
+      const q: Vec3 = [o[0] + d[0] * s, o[1] + d[1] * s, o[2] + d[2] * s];
+      if (q[2] <= 0.02) return s; // past the camera
+      const u = q[0] / (q[2] * tanHalfFov * aspect) * 0.5 + 0.5;
+      const v = 0.5 - q[1] / (q[2] * tanHalfFov) * 0.5;
+      if (u < 0 || u > 1 || v < 0 || v > 1) return maxLen; // leaves the picture: draw it to full length
+      const z = depthAt(u, v);
+      if (z < info.far * 0.98 && q[2] > z * 1.01 && q[2] < z * 3) {
+        // Refine between the last free step and this one.
+        let lo = prev;
+        let hi = s;
+        for (let r = 0; r < 8; r++) {
+          const mid = (lo + hi) / 2;
+          const m: Vec3 = [o[0] + d[0] * mid, o[1] + d[1] * mid, o[2] + d[2] * mid];
+          const mu = m[0] / (m[2] * tanHalfFov * aspect) * 0.5 + 0.5;
+          const mv = 0.5 - m[1] / (m[2] * tanHalfFov) * 0.5;
+          if (m[2] > depthAt(mu, mv) * 1.01) hi = mid;
+          else lo = mid;
+        }
+        return hi;
+      }
+      prev = s;
+    }
+    return maxLen;
+  };
+  const writeLasers = (list: NonNullable<RenderOut["lasers"]>) => {
+    laserData.fill(0);
+    const n = Math.min(4, list.length);
+    const maxLen = info.far * 1.5;
+    for (let li = 0; li < n; li++) {
+      const L = list[li];
+      const z = L.originDepth > 0 ? L.originDepth : depthAt(L.originU, L.originV) * 0.98;
+      const o = viewPos(L.originU, L.originV, Math.min(z, info.far * 0.9));
+      const az = L.azimuth * rad;
+      const el = L.elevation * rad;
+      const aim: Vec3 = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+      // Sideways axis of the fan (horizontal at roll 0), then rolled around the aim.
+      let right = normalize(cross([0, 1, 0], aim));
+      if (!Number.isFinite(right[0])) right = [1, 0, 0];
+      const up = cross(aim, right);
+      const roll = L.roll * rad;
+      right = normalize(right.map((x, i) => x * Math.cos(roll) + up[i] * Math.sin(roll)) as Vec3);
+      const normal = normalize(cross(aim, right));
+      const half = (L.spread / 2) * rad;
+      const base = 4 + li * 24;
+      laserData.set([...o, L.count, ...aim, L.sheet, ...right, half, ...normal, L.intensity, ...(L.color as Vec3), L.width * rad, L.hit, maxLen, 0, 0], base);
+      for (let bi = 0; bi < L.count; bi++) {
+        const a = L.count > 1 ? -half + (2 * half * bi) / (L.count - 1) : 0;
+        const d = normalize(aim.map((x, i) => x * Math.cos(a) + right[i] * Math.sin(a)) as Vec3);
+        laserData.set([...d, beamLength(o, d, maxLen)], 4 + 4 * 24 + (li * 24 + bi) * 4);
+      }
+    }
+    laserCount[0] = n;
+    device.queue.writeBuffer(laserBuf, 0, laserData);
   };
 
   // B: render 120 frames at 1080p back to back and log the average GPU time per frame.
@@ -706,6 +776,11 @@ async function main() {
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
+const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const normalize = (a: Vec3): Vec3 => {
+  const l = Math.hypot(...a);
+  return [a[0] / l, a[1] / l, a[2] / l];
+};
 /**
  * Unit vector toward the sun, in scene space (x right, y up, z into the scene). With an arc angle, the sun
  * sits on the vertical half-circle through its azimuth: 0 front horizon, 90 overhead, 180 behind us.

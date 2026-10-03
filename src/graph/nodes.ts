@@ -26,7 +26,24 @@ export interface SceneConsts {
 }
 
 /** What the output nodes produce for the renderer. Anything left out keeps the display's own setting. */
+export interface LaserOut {
+  originU: number; // where it starts, as a point in the picture (0..1)
+  originV: number;
+  originDepth: number; // 0: on the rock at that pixel; > 0: in the air, this far from the camera
+  azimuth: number; // degrees: 0 into the scene, 180 toward the camera, positive = right
+  elevation: number; // degrees up
+  roll: number; // degrees: tilts the fan's plane around the aim (0 = fan spreads sideways)
+  spread: number; // degrees across the fan
+  count: number; // beams
+  width: number; // beam thickness, degrees as seen from the camera
+  color: number[];
+  intensity: number;
+  sheet: number; // 0..1: fill between the beams with a plane of light
+  hit: number; // how brightly beams and sheets mark the rock they strike
+}
+
 export interface RenderOut {
+  lasers?: LaserOut[];
   sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number };
   camera?: { swayX: number; swayY: number; pushZ: number };
   tone?: { baseDim: number; baked: number; cap: number };
@@ -369,6 +386,40 @@ const defs: NodeDef[] = [
     outputs: [],
     eval: (i, ctx) => {
       ctx.out.camera = { swayX: num(i.swayX), swayY: num(i.swayY), pushZ: Math.max(0, num(i.pushZ)) };
+      return {};
+    },
+  },
+  {
+    type: "Laser",
+    category: "Output",
+    doc:
+      "A laser fixture: count beams fanned over spread degrees from an origin in the picture (originDepth 0 = on the rock " +
+      "there). sheet fills between the beams with a plane of light; hit sets how brightly beams and sheets mark the rock " +
+      "they strike. Up to 4 lasers render.",
+    inputs: [
+      { name: "originU", default: 0.5, min: 0, max: 1, step: 0.005 },
+      { name: "originV", default: 0.7, min: 0, max: 1, step: 0.005 },
+      { name: "originDepth", default: 0, min: 0, step: 0.05 },
+      { name: "azimuth", default: 0, step: 0.5 },
+      { name: "elevation", default: 20, step: 0.5 },
+      { name: "roll", default: 0, step: 0.5 },
+      { name: "spread", default: 40, min: 0, max: 180, step: 0.5 },
+      { name: "count", default: 7, min: 1, max: 24, step: 1 },
+      { name: "width", default: 0.08, min: 0.005, max: 2, step: 0.005 },
+      { name: "color", default: [0.1, 1, 0.25] },
+      { name: "intensity", default: 1, min: 0, step: 0.05 },
+      { name: "sheet", default: 0, min: 0, max: 1, step: 0.05 },
+      { name: "hit", default: 1, min: 0, step: 0.05 },
+    ],
+    outputs: [],
+    eval: (i, ctx) => {
+      if (num(i.intensity) <= 0) return {};
+      (ctx.out.lasers ??= []).push({
+        originU: num(i.originU), originV: num(i.originV), originDepth: Math.max(0, num(i.originDepth)),
+        azimuth: num(i.azimuth), elevation: num(i.elevation), roll: num(i.roll), spread: clamp(num(i.spread), 0, 180),
+        count: Math.round(clamp(num(i.count), 1, 24)), width: Math.max(0.005, num(i.width)), color: vec(i.color),
+        intensity: num(i.intensity), sheet: clamp(num(i.sheet), 0, 1), hit: Math.max(0, num(i.hit)),
+      });
       return {};
     },
   },

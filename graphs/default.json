@@ -369,6 +369,123 @@
     "baked": 0.1,
     "cap": 1.4
    }
+  },
+  {
+   "id": "fanSweep",
+   "type": "Oscillator",
+   "pos": [
+    1300,
+    20
+   ],
+   "name": "Fan sweep: 1 cycle / 8 bars",
+   "params": {
+    "cycles": 0.125,
+    "amplitude": 35,
+    "offset": 180
+   }
+  },
+  {
+   "id": "fanLevel",
+   "type": "Expression",
+   "pos": [
+    1300,
+    230
+   ],
+   "name": "Fan brightness",
+   "params": {
+    "expr": "1.2 * a * (0.5 + 0.5 * b)"
+   }
+  },
+  {
+   "id": "fanColor",
+   "type": "Color",
+   "pos": [
+    1300,
+    400
+   ],
+   "name": "Laser green",
+   "params": {
+    "r": 0.1,
+    "g": 1,
+    "b": 0.25
+   }
+  },
+  {
+   "id": "laserFan",
+   "type": "Laser",
+   "pos": [
+    1630,
+    20
+   ],
+   "name": "Pinnacle fan",
+   "params": {
+    "originU": 0.555,
+    "originV": 0.47,
+    "originDepth": 0,
+    "elevation": 18,
+    "spread": 50,
+    "count": 9,
+    "width": 0.06,
+    "hit": 1.5
+   }
+  },
+  {
+   "id": "sheetHeight",
+   "type": "Expression",
+   "pos": [
+    1300,
+    560
+   ],
+   "name": "Sheet height: 8 bars",
+   "params": {
+    "expr": "0.3 + 0.1 * sin(tau * a / 8)"
+   }
+  },
+  {
+   "id": "sheetLevel",
+   "type": "Expression",
+   "pos": [
+    1300,
+    730
+   ],
+   "name": "Sheet brightness",
+   "params": {
+    "expr": "0.9 * a"
+   }
+  },
+  {
+   "id": "sheetColor",
+   "type": "Color",
+   "pos": [
+    1300,
+    880
+   ],
+   "name": "Laser red",
+   "params": {
+    "r": 1,
+    "g": 0.08,
+    "b": 0.25
+   }
+  },
+  {
+   "id": "laserSheet",
+   "type": "Laser",
+   "pos": [
+    1630,
+    560
+   ],
+   "name": "Contour sheet",
+   "params": {
+    "originU": 0.5,
+    "originDepth": 0.5,
+    "azimuth": 0,
+    "elevation": -22,
+    "spread": 140,
+    "count": 24,
+    "width": 0.05,
+    "sheet": 1,
+    "hit": 1.5
+   }
   }
  ],
  "wires": [
@@ -860,6 +977,116 @@
    "to": [
     "camera",
     "pushZ"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "fanSweep",
+    "phase"
+   ]
+  },
+  {
+   "from": [
+    "gate",
+    "value"
+   ],
+   "to": [
+    "fanLevel",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "pump",
+    "value"
+   ],
+   "to": [
+    "fanLevel",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "fanSweep",
+    "value"
+   ],
+   "to": [
+    "laserFan",
+    "azimuth"
+   ]
+  },
+  {
+   "from": [
+    "fanLevel",
+    "value"
+   ],
+   "to": [
+    "laserFan",
+    "intensity"
+   ]
+  },
+  {
+   "from": [
+    "fanColor",
+    "color"
+   ],
+   "to": [
+    "laserFan",
+    "color"
+   ]
+  },
+  {
+   "from": [
+    "bar",
+    "count"
+   ],
+   "to": [
+    "sheetHeight",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "gate",
+    "value"
+   ],
+   "to": [
+    "sheetLevel",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "sheetHeight",
+    "value"
+   ],
+   "to": [
+    "laserSheet",
+    "originV"
+   ]
+  },
+  {
+   "from": [
+    "sheetLevel",
+    "value"
+   ],
+   "to": [
+    "laserSheet",
+    "intensity"
+   ]
+  },
+  {
+   "from": [
+    "sheetColor",
+    "color"
+   ],
+   "to": [
+    "laserSheet",
+    "color"
    ]
   }
  ]
