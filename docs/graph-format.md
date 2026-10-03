@@ -61,6 +61,7 @@ Defined in `src/graph/nodes.ts` (each with a one-line doc shown in the editor). 
 | Music | Time, Beat, Bar, Phrase, Intensity, Loudness, Bass, Pump, Hats, Section, DropHit, Tension, Spurts, Gate |
 | Scene | GapHorizon |
 | Value | Number, Color |
+| Setup | Setup |
 | Shape | Expression, Add, Multiply, Remap, Oscillator, MixColor |
 | Output | Sun, Camera, Tone |
 
@@ -99,3 +100,8 @@ Output nodes write the renderer's parameters. Anything a graph doesn't set keeps
 | Sun | `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
 | Camera | `swayX`, `swayY`, `pushZ` in units of the display's sway amount (pushZ is clamped to ≥ 0) |
 | Tone | `baseDim`, `baked`, `cap` |
+
+Sun, Laser, SkyLaser and Scan also take `level` (0..1, default 1), which scales them. A `Setup` node's `level`
+output goes there: a setup (the sun, the ground laser rigs, the scan, ...) plays in the kinds of section ticked
+on its Setup node (intro, build, drop, breakdown, normal, outro), fading in over `fadeIn` and out over
+`fadeOut` seconds; `on` = 0 turns it off everywhere. The music monitor (G on the display) lists the setups.

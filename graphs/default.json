@@ -619,6 +619,114 @@
     "glow": 6,
     "hit": 2
    }
+  },
+  {
+   "id": "setupSun",
+   "type": "Setup",
+   "name": "Setup: sun",
+   "params": {
+    "on": 1,
+    "intro": 1,
+    "build": 1,
+    "drop": 1,
+    "breakdown": 1,
+    "normal": 1,
+    "outro": 1
+   },
+   "pos": [
+    1000,
+    150
+   ]
+  },
+  {
+   "id": "setupRigs",
+   "type": "Setup",
+   "name": "Setup: ground laser rigs",
+   "params": {
+    "on": 1,
+    "intro": 0,
+    "build": 1,
+    "drop": 1,
+    "breakdown": 0,
+    "normal": 1,
+    "outro": 0
+   },
+   "pos": [
+    1630,
+    900
+   ]
+  },
+  {
+   "id": "setupGod",
+   "type": "Setup",
+   "name": "Setup: god lasers",
+   "params": {
+    "on": 0,
+    "intro": 0,
+    "build": 0,
+    "drop": 1,
+    "breakdown": 0,
+    "normal": 0,
+    "outro": 0
+   },
+   "pos": [
+    1630,
+    1850
+   ]
+  },
+  {
+   "id": "setupCurtains",
+   "type": "Setup",
+   "name": "Setup: sky curtains",
+   "params": {
+    "on": 0,
+    "intro": 0,
+    "build": 0,
+    "drop": 1,
+    "breakdown": 0,
+    "normal": 0,
+    "outro": 0
+   },
+   "pos": [
+    1630,
+    1300
+   ]
+  },
+  {
+   "id": "setupSheet",
+   "type": "Setup",
+   "name": "Setup: contour sheet",
+   "params": {
+    "on": 0,
+    "intro": 0,
+    "build": 0,
+    "drop": 1,
+    "breakdown": 0,
+    "normal": 1,
+    "outro": 0
+   },
+   "pos": [
+    1630,
+    410
+   ]
+  },
+  {
+   "id": "setupScan",
+   "type": "Setup",
+   "name": "Setup: MRI scan",
+   "params": {
+    "on": 0,
+    "intro": 0,
+    "build": 0,
+    "drop": 1,
+    "breakdown": 0,
+    "normal": 0,
+    "outro": 0
+   },
+   "pos": [
+    1630,
+    1550
+   ]
   }
  ],
  "wires": [
@@ -1350,6 +1458,66 @@
    "to": [
     "godLasers",
     "color"
+   ]
+  },
+  {
+   "from": [
+    "setupSun",
+    "level"
+   ],
+   "to": [
+    "sun",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "setupRigs",
+    "level"
+   ],
+   "to": [
+    "skyBeams",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "setupGod",
+    "level"
+   ],
+   "to": [
+    "godLasers",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "setupCurtains",
+    "level"
+   ],
+   "to": [
+    "skyCurtains",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "setupSheet",
+    "level"
+   ],
+   "to": [
+    "laserSheet",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "setupScan",
+    "level"
+   ],
+   "to": [
+    "scan",
+    "level"
    ]
   }
  ]

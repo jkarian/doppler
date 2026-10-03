@@ -111,7 +111,7 @@ export interface InitContext {
 
 export interface NodeDef {
   type: string;
-  category: "Music" | "Shape" | "Value" | "Scene" | "Output";
+  category: "Music" | "Setup" | "Shape" | "Value" | "Scene" | "Output";
   doc: string;
   inputs: InputDef[];
   outputs: string[];
@@ -337,6 +337,57 @@ const defs: NodeDef[] = [
     eval: (_i, ctx, state) => ({ value: state ? (state as SunGate).value(ctx.t) : 1 }),
   },
 
+  // --- Setups -----------------------------------------------------------------------------
+  {
+    type: "Setup",
+    category: "Setup",
+    doc:
+      "A setup (the sun, the ground laser rigs, the scan, ...) switched on and off by the song: on in the kinds of section " +
+      "ticked here, off in the rest. level fades up over fadeIn seconds when a chosen section starts (keep it short so " +
+      "drops hit) and down over fadeOut when it ends. on = 0 turns the setup off everywhere. Wire level into the setup's " +
+      "output node (its level input).",
+    inputs: [
+      { name: "on", default: 1, kind: "const", min: 0, max: 1, step: 1, doc: "master switch" },
+      { name: "intro", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "build", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "drop", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "breakdown", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "normal", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "outro", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "fadeIn", default: 0.05, kind: "const", min: 0, max: 8, step: 0.05, doc: "seconds" },
+      { name: "fadeOut", default: 1.5, kind: "const", min: 0, max: 8, step: 0.05, doc: "seconds" },
+    ],
+    outputs: ["level"],
+    init: (c, ctx) => {
+      if (num(c.on) < 0.5) return { off: true, runs: [] as [number, number][] };
+      const want = (kind: string) => {
+        // Version 1 files only say "quiet": it counts when breakdowns do.
+        const k = kind === "quiet" ? "breakdown" : kind;
+        return num(c[k] ?? 0) > 0.5;
+      };
+      const runs: [number, number][] = [];
+      for (const s of ctx.music?.a.sections ?? []) {
+        if (!want(s.kind)) continue;
+        const last = runs.at(-1);
+        if (last && Math.abs(last[1] - s.start) < 1e-3) last[1] = s.end;
+        else runs.push([s.start, s.end]);
+      }
+      if (!ctx.music) runs.push([-Infinity, Infinity]);
+      return { off: false, runs, fadeIn: num(c.fadeIn), fadeOut: num(c.fadeOut) };
+    },
+    eval: (_i, ctx, state) => {
+      const s = state as { off: boolean; runs: [number, number][]; fadeIn: number; fadeOut: number };
+      if (s.off) return { level: 0 };
+      const ease = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+      let level = 0;
+      for (const [a, b] of s.runs) {
+        if (ctx.t >= a && ctx.t < b) level = Math.max(level, s.fadeIn > 0 ? ease((ctx.t - a) / s.fadeIn) : 1);
+        else if (ctx.t >= b) level = Math.max(level, s.fadeOut > 0 ? 1 - ease((ctx.t - b) / s.fadeOut) : 0);
+      }
+      return { level };
+    },
+  },
+
   // --- Scene ------------------------------------------------------------------------------
   {
     type: "GapHorizon",
@@ -468,12 +519,14 @@ const defs: NodeDef[] = [
       { name: "flare", default: 0.8 },
       { name: "skyBoost", default: 0 },
       { name: "enabled", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
     outputs: [],
     eval: (i, ctx) => {
+      const k = clamp(num(i.level), 0, 1);
       ctx.out.sun = {
-        on: num(i.enabled) > 0.5, arc: num(i.arc), azimuth: num(i.azimuth), intensity: Math.max(0, num(i.intensity)),
-        color: vec(i.color), rays: Math.max(0, num(i.rays)), flare: Math.max(0, num(i.flare)), skyBoost: num(i.skyBoost),
+        on: num(i.enabled) > 0.5 && k > 0.001, arc: num(i.arc), azimuth: num(i.azimuth), intensity: Math.max(0, num(i.intensity)) * k,
+        color: vec(i.color), rays: Math.max(0, num(i.rays)) * k, flare: Math.max(0, num(i.flare)) * k, skyBoost: num(i.skyBoost) * k,
       };
       return {};
     },
@@ -512,15 +565,17 @@ const defs: NodeDef[] = [
       { name: "intensity", default: 1, min: 0, step: 0.05 },
       { name: "sheet", default: 0, min: 0, max: 1, step: 0.05 },
       { name: "hit", default: 1, min: 0, step: 0.05 },
+      { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
     outputs: [],
     eval: (i, ctx) => {
-      if (num(i.intensity) <= 0) return {};
+      const intensity = num(i.intensity) * clamp(num(i.level), 0, 1);
+      if (intensity <= 0) return {};
       (ctx.out.lasers ??= []).push({
         originU: num(i.originU), originV: num(i.originV), originDepth: Math.max(0, num(i.originDepth)),
         azimuth: num(i.azimuth), elevation: num(i.elevation), roll: num(i.roll), spread: clamp(num(i.spread), 0, 180),
         count: Math.round(clamp(num(i.count), 1, 24)), width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color),
-        intensity: num(i.intensity), sheet: clamp(num(i.sheet), 0, 1), hit: Math.max(0, num(i.hit)),
+        intensity, sheet: clamp(num(i.sheet), 0, 1), hit: Math.max(0, num(i.hit)),
       });
       return {};
     },
@@ -557,17 +612,19 @@ const defs: NodeDef[] = [
       { name: "color", default: [0.2, 0.6, 1] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
       { name: "hit", default: 1.5, min: 0, step: 0.05 },
+      { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
     outputs: [],
     eval: (i, ctx) => {
-      if (num(i.intensity) <= 0) return {};
+      const intensity = num(i.intensity) * clamp(num(i.level), 0, 1);
+      if (intensity <= 0) return {};
       (ctx.out.skyLasers ??= []).push({
         from: num(i.from) > 0.5 ? 1 : 0, elevMin: num(i.elevMin), elevMax: Math.max(num(i.elevMin), num(i.elevMax)),
         count: Math.round(clamp(num(i.count), 1, 24)), trigger: num(i.trigger), seed: num(i.seed),
         uMin: num(i.uMin), uMax: num(i.uMax), vMin: num(i.vMin), vMax: num(i.vMax), minDepth: Math.max(0, num(i.minDepth)), tilt: Math.max(0, num(i.tilt)),
         drift: Math.max(0, num(i.drift)), driftSpeed: Math.max(0, num(i.driftSpeed)), t: ctx.t,
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
-        width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity: num(i.intensity), hit: Math.max(0, num(i.hit)),
+        width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity, hit: Math.max(0, num(i.hit)),
       });
       return {};
     },
@@ -589,14 +646,16 @@ const defs: NodeDef[] = [
       { name: "reach", default: 0.72, min: 0.05, max: 1, step: 0.01 },
       { name: "color", default: [0.4, 0.9, 1] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
+      { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
     outputs: [],
     eval: (i, ctx) => {
-      if (num(i.intensity) <= 0) return {};
+      const intensity = num(i.intensity) * clamp(num(i.level), 0, 1);
+      if (intensity <= 0) return {};
       ctx.out.scan = {
         axis: Math.round(clamp(num(i.axis), 0, 2)), position: num(i.position), lines: Math.round(clamp(num(i.lines), 1, 32)),
         spacing: Math.max(0.001, num(i.spacing)), thickness: Math.max(0.01, num(i.thickness)), trail: Math.max(0, num(i.trail)),
-        reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity: num(i.intensity),
+        reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity,
       };
       return {};
     },
