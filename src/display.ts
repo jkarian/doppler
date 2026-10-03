@@ -508,32 +508,51 @@ async function main() {
       .split(";")
       .map((q) => q.split(",").map(Number))
       .filter((q) => q.length === 2 && q.every(Number.isFinite));
-  const setNookPoints = (pts: number[][]) => {
+  // final = false while dragging: update the picture only; tell the editor and monitor on release.
+  const setNookPoints = (pts: number[][], final = true) => {
     const node = nookNode();
     if (!node) return;
     node.params = { ...node.params, positions: pts.map((q) => q.map((x) => x.toFixed(4)).join(",")).join("; ") };
     runtime.load(runtime.graph);
+    if (!final) return;
     channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
     monitor?.graphChanged();
   };
+  const uvToScreen = (u: number, v: number) => {
+    const c = camPos(time);
+    return [
+      (((u * 2 - 1 - cam.center[0] + c[0] / (pivotZ * tanHalfFov * aspect)) * viewScale[0] + 1) / 2) * innerWidth,
+      ((1 - (1 - v * 2 - cam.center[1] + c[1] / (pivotZ * tanHalfFov)) * viewScale[1]) / 2) * innerHeight,
+    ];
+  };
+  let nookDrag = -1; // index of the light being dragged
   // Numbered markers on each light while placing (a light behind rock may show no pool to click near).
   const nookMarkers = document.createElement("div");
   nookMarkers.style.cssText = "position:fixed;inset:0;pointer-events:none;font:600 12px system-ui,sans-serif";
   document.body.append(nookMarkers);
   const drawNookMarkers = () => {
     if (!nookPlacing) return void (nookMarkers.innerHTML = "");
-    const c = camPos(time);
     nookMarkers.innerHTML = nookPoints()
       .map(([u, v], i) => {
-        const x = ((u * 2 - 1 - cam.center[0] + c[0] / (pivotZ * tanHalfFov * aspect)) * viewScale[0] + 1) / 2 * innerWidth;
-        const y = (1 - (1 - v * 2 - cam.center[1] + c[1] / (pivotZ * tanHalfFov)) * viewScale[1]) / 2 * innerHeight;
-        return `<div style="position:absolute;left:${x - 10}px;top:${y - 10}px;width:18px;height:18px;border:2px solid #ffd27a;border-radius:50%;color:#ffd27a;text-align:center;line-height:18px;text-shadow:0 0 3px #000">${i + 1}</div>`;
+        const [x, y] = uvToScreen(u, v);
+        const ring = i === nookDrag ? "#fff" : "#ffd27a";
+        return `<div style="position:absolute;left:${x - 10}px;top:${y - 10}px;width:18px;height:18px;border:2px solid ${ring};border-radius:50%;color:${ring};text-align:center;line-height:18px;text-shadow:0 0 3px #000">${i + 1}</div>`;
       })
       .join("");
   };
+  // Grab a ring and drag to move that light; click empty rock to add one.
   const placeNook = (e: PointerEvent) => {
     if (!nookNode()) return;
     const pts = nookPoints();
+    if (!e.shiftKey && e.button === 0) {
+      const near = pts.map(([u, v]) => uvToScreen(u, v)).map(([x, y]) => Math.hypot(x - e.clientX, y - e.clientY));
+      const i = near.indexOf(Math.min(...near));
+      if (i >= 0 && near[i] < 18) {
+        nookDrag = i;
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
     const [u, v] = toImageUv(e);
     if (e.shiftKey || e.button === 2) {
       let best = -1;
@@ -557,8 +576,16 @@ async function main() {
     last = [e.clientX, e.clientY];
     if (dragging === "target") aimAt(e);
   });
-  canvas.addEventListener("pointerup", () => (dragging = null));
+  canvas.addEventListener("pointerup", () => {
+    dragging = null;
+    if (nookDrag >= 0) (nookDrag = -1), setNookPoints(nookPoints());
+  });
   canvas.addEventListener("pointermove", (e) => {
+    if (nookDrag >= 0) {
+      const pts = nookPoints();
+      pts[nookDrag] = toImageUv(e);
+      return setNookPoints(pts, false);
+    }
     if (dragging === "target") aimAt(e);
     if (dragging === "source") {
       const dx = e.clientX - last[0];
@@ -976,7 +1003,7 @@ async function main() {
       `${trackName}  ${audio.paused ? "paused" : "playing"}  ${time.toFixed(2)} s  bar ${music.bar(time).toFixed(2)}  ` +
 `${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
       `space play · J L seek · { } offset · A auto light · G music monitor · N place nook lights\n` +
-      (nookPlacing ? `PLACING NOOK LIGHTS: click to add · shift/right-click to remove · Delete clears all · N when done · Save in the monitor (G)\n` : "")
+      (nookPlacing ? `PLACING NOOK LIGHTS: drag a ring to move it · click to add · shift/right-click to remove · Delete clears all · N when done · Save in the monitor (G)\n` : "")
     );
   };
   requestAnimationFrame(frame);
