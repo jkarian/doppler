@@ -432,9 +432,11 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   let q = pc.xy / (pc.z * tanXY) + u.camPos.xy / (u.pivotZ * tanXY);
   var out: VsOut;
   out.pos = vec4f((q - u.center) * u.viewScale, clamp(pc.z / (u.far * 2.0), 0.0, 1.0), 1.0);
-  // With a background layer, the main layer drops the squares that span a silhouette (stretched, they show
-  // as dark seams when the camera moves): the background layer behind fills the gap with hidden rock.
-  if (layer == 0u && silhouette && u.up.w > 0.5) { out.pos = vec4f(0.0, 0.0, -1.0, 1.0); }
+  // With a background layer, both layers drop the squares that span a silhouette (stretched, they show as
+  // dark seams when the camera moves). The main layer's gaps are filled by the background layer's hidden
+  // rock; the background layer's own silhouettes (where its band of hidden rock meets the near object it
+  // sits behind) would otherwise slide out from behind that object as a ghost outline.
+  if (silhouette && u.up.w > 0.5) { out.pos = vec4f(0.0, 0.0, -1.0, 1.0); }
   out.uv = uv;
   return out;
 }
