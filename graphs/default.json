@@ -460,11 +460,11 @@
     1300,
     1330
    ],
-   "name": "Laser ice blue",
+   "name": "Laser red",
    "params": {
-    "r": 0.55,
-    "g": 0.8,
-    "b": 1
+    "r": 1,
+    "g": 0.04,
+    "b": 0.03
    }
   },
   {
@@ -481,9 +481,9 @@
     "seed": 3,
     "uMin": 0.3,
     "uMax": 0.72,
-    "vMin": 0.35,
-    "vMax": 0.95,
-    "minDepth": 1.5,
+    "vMin": 0.3,
+    "vMax": 0.97,
+    "minDepth": 3.5,
     "elevMin": 12,
     "elevMax": 70,
     "fade": 0,

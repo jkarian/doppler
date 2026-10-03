@@ -705,11 +705,16 @@ async function main() {
       const place = seeded(S.seed * 7919 + bi * 31);
       let u = 0.5;
       let v = 0.8;
-      for (let tries = 0; tries < 60; tries++) {
+      // Ground you could stand a rig on: rock that recedes going up the picture (a floor or ledge top),
+      // not a cliff face turned toward the camera.
+      for (let tries = 0; tries < 120; tries++) {
         u = S.uMin + (S.uMax - S.uMin) * place();
         v = S.vMin + (S.vMax - S.vMin) * place();
         const z = depthAt(u, v);
-        if (z < info.far * 0.9 && z >= S.minDepth) break;
+        if (z >= info.far * 0.9 || z < S.minDepth) continue;
+        const above = depthAt(u, v - 0.01);
+        const below = depthAt(u, v + 0.01);
+        if (above > z * 1.04 && below < z * 0.99 && above < info.far * 0.9) break;
       }
       const o = viewPos(u, v, depthAt(u, v) * 0.985); // just in front of the rock
       const aimRand = seeded(S.seed * 104729 + step * 131 + bi * 17);

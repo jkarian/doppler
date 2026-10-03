@@ -257,15 +257,23 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         let to = dot(o - cam, v);
         if (to > 0.0 && to < viewLen * 1.02) {
           let angO = length(cross(v, o - cam)) / max(to, 0.05);
-          g += 2.0 * exp(-pow(angO / (drawAng * 2.5), 2.0)) * distanceFade(to);
+          g += 3.0 * beamProfile(angO, drawAng * 1.5, 3.0) * distanceFade(to);
         }
       }
       // Hot spot where the beam lands on the rock.
-      if (!sky && b.w < L.maxLen * 0.999) {
+      if (b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
-        let rad = 0.004 * distance(end, cam) + 0.002;
-        let dist = distance(p, end);
-        r += L.hit * (2.0 * exp(-pow(dist / rad, 2.0)) + 0.3 * exp(-pow(dist / (rad * 6.0), 2.0)));
+        // Additive: a glowing point where the beam strikes, with the beam's profile...
+        let te = dot(end - cam, v);
+        if (te > 0.0 && te < viewLen * 1.02) {
+          let angE = length(cross(v, end - cam)) / max(te, 0.05);
+          g += L.hit * 2.0 * beamProfile(angE, drawAng * 1.5, 4.0) * distanceFade(te);
+        }
+        // ...and a soft spill lighting the rock around it.
+        if (!sky) {
+          let rad = 0.004 * distance(end, cam) + 0.002;
+          r += L.hit * 0.3 * exp(-pow(distance(p, end) / (rad * 6.0), 2.0));
+        }
       }
     }
     if (L.sheet > 0.0) {
