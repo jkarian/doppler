@@ -10,10 +10,12 @@
 //   M camera sway on/off   ; '  sway amount   O fill / fit whole picture
 //   with ?track=<file in tracks/>:
 //   space play/pause   J L seek 5 s   { } audio/video offset (10 ms; alt: 1 ms)   A auto light on/off
+//   G music monitor: the track's sections, drops, energy and tension, live meters, and response sliders
 //   S shadows   V cycle debug view   H show values   P save 1080p frame (shift: 4K)   C copy values   R reset   F full screen
 
 import { Music, seeded, type Analysis } from "./music.ts";
 import { GraphRuntime, type Graph } from "./graph/runtime.ts";
+import { createMonitor } from "./monitor.ts";
 import type { RenderOut } from "./graph/nodes.ts";
 
 type Vec3 = [number, number, number];
@@ -387,9 +389,22 @@ async function main() {
   const channel = new BroadcastChannel("doppler");
   channel.onmessage = (e: MessageEvent) => {
     const msg = e.data;
-    if (msg?.type === "graph") runtime.load(msg.graph as Graph);
+    if (msg?.type === "graph" && msg.from !== "display") runtime.load(msg.graph as Graph), monitor?.graphChanged();
     else if (msg?.type === "hello") channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display" });
   };
+  const monitor = music
+    ? createMonitor({
+        music,
+        runtime,
+        time: () => time,
+        seek: (t) => (audio.currentTime = Math.max(0, t - avOffset)),
+        edited: (graph) => channel.postMessage({ type: "graph", graph, name: graphName, from: "display", edit: true }),
+        save: async () => {
+          const res = await fetch(`/graph?name=${encodeURIComponent(graphName)}`, { method: "POST", body: JSON.stringify(runtime.graph, null, 1) });
+          return res.ok ? `saved graphs/${graphName}.json` : `save failed: ${res.status}`;
+        },
+      })
+    : null;
   let lastSent = 0;
   const sendValues = (now: number) => {
     if (now - lastSent < 66) return; // ~15 updates a second is plenty for the editor
@@ -553,6 +568,7 @@ async function main() {
     else if (key === "o") (cam.cover = !cam.cover), updateView();
     else if (key === "e") window.open(`editor.html?graph=${graphName}`, "doppler-editor");
     else if (key === "b") benchmark();
+    else if (key === "g") monitor?.toggle();
     else if (key === "t") look.sun = !look.sun;
     else if (key === "1") look.flare = clamp(look.flare / 1.25, 0, 5);
     else if (key === "2") look.flare = clamp(look.flare * 1.25 || 0.05, 0, 5);
@@ -858,6 +874,7 @@ async function main() {
     time = music ? audio.currentTime + avOffset : now / 1000;
     draw();
     sendValues(now);
+    monitor?.update(time);
     if (!hud.hidden && !recording) {
       const look = animatedLook(time); // what's actually on screen, after the graph
       hud.textContent =
@@ -879,7 +896,7 @@ async function main() {
     return (
       `${trackName}  ${audio.paused ? "paused" : "playing"}  ${time.toFixed(2)} s  bar ${music.bar(time).toFixed(2)}  ` +
 `${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
-      `space play · J L seek · { } offset · A auto light\n`
+      `space play · J L seek · { } offset · A auto light · G music monitor\n`
     );
   };
   requestAnimationFrame(frame);

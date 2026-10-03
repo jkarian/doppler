@@ -43,7 +43,8 @@ channel.onmessage = (e: MessageEvent) => {
     status.innerHTML =
       `<span class="live">● live</span> ${msg.track ?? "no track"} · ${msg.playing ? "playing" : "paused"} · ${Number(msg.t).toFixed(2)} s`;
     updateLive();
-  } else if (msg?.type === "graph" && msg.from === "display" && !graph.nodes.length) {
+  } else if (msg?.type === "graph" && msg.from === "display" && (msg.edit || !graph.nodes.length)) {
+    // From the display: its graph when we open, or an edit made in its music monitor.
     setGraph(msg.graph);
   }
 };
