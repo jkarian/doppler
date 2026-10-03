@@ -34,7 +34,7 @@ struct Uniforms {
   flare: f32,          // lens flare strength (already scaled by how much of the sun is visible)
   sunScreen: vec2f,    // the sun's position on screen, ndc
   skyBoost: f32,       // extra sky glow, pumping with the kick
-  pad0: f32,
+  sunFloor: f32,       // how much sun flat, upward-facing ground gets (1 = all; 0 = the sun lights only walls)
   scan: vec4f,         // MRI scan: axis (0 depth, 1 height, 2 sideways), front position, spacing, thickness (in axis units)
   scanColor: vec4f,    // rgb, intensity
   scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), -
@@ -566,6 +566,9 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   var vis2 = select(textureSampleLevel(shadowTex2, samp, uv, 0.0), vec4f(1.0), u.shadows < 0.5);
   let shadow = vis.r;
   let haze = exp(-u.hazeBeta * z);
+  // Sun on flat ground (canyon floor, river, ledge tops: normals pointing up) can be held back so it
+  // lights only the walls, however high it climbs.
+  let floorK = select(1.0, mix(1.0, u.sunFloor, smoothstep(0.55, 0.85, n.y)), u.sun > 0.5);
   var nook = vec3f(0.0);
   for (var i = 0u; i < min(nooks.count, 16u); i++) {
     let toL = nooks.l[i].pos - p;
@@ -577,7 +580,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
       nook += nooks.l[i].color * (nookFall(d, nooks.l[i].radius) * nl * sh);
     }
   }
-  let light = select(u.lightColor * (u.intensity * ndl * hit.amount * shadow * haze) + nook * haze, vec3f(0.0), sky);
+  let light = select(u.lightColor * (u.intensity * ndl * hit.amount * shadow * haze * floorK) + nook * haze, vec3f(0.0), sky);
 
   // Base: the de-lit rock under soft night-sky light from above (cool) and bounce from below (warm),
   // so the photo's own daylight, haze and sun shafts don't show. `baked` mixes the photo back in.

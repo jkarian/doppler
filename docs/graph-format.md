@@ -97,7 +97,7 @@ Output nodes write the renderer's parameters. Anything a graph doesn't set keeps
 
 | Node | Inputs |
 |---|---|
-| Sun | `maxArc` soft ceiling (degrees; eases in over the last 6), `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
+| Sun | `gain` (brightness multiplier), `floorLight` (0..1: sun on flat ground; 0 = walls only), `maxArc` soft ceiling (degrees; eases in over the last 6), `arc` degrees along the sun's half-circle (0 front horizon, 90 overhead, 180 behind the camera), `azimuth` degrees, `intensity`, `color`, `rays` (visible shafts), `flare`, `skyBoost`, `enabled` |
 | Camera | `swayX`, `swayY`, `pushZ` in units of the display's sway amount (pushZ is clamped to ≥ 0) |
 | Tone | `baseDim`, `baked`, `cap` |
 | Sync | `lead` (ms, positive = visuals earlier than the audio; keys `{ }` on the display) |

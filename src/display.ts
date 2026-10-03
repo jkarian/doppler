@@ -441,12 +441,14 @@ async function main() {
     });
   };
   let skyBoost = 0;
+  let sunFloor = 1;
   const graphLook = (base: Look): Look => {
     const l = { ...base };
     const tone = graphOut.tone;
     if (tone) Object.assign(l, { baseDim: tone.baseDim, baked: tone.baked, cap: tone.cap });
     const sun = graphOut.sun;
     skyBoost = 0;
+    sunFloor = sun?.floor ?? 1;
     if (sun && l.sun) {
       Object.assign(l, { sunArc: sun.arc, sunAzimuth: sun.azimuth, intensity: sun.intensity, color: sun.color as Vec3, rays: sun.rays, flare: sun.flare });
       skyBoost = sun.skyBoost;
@@ -858,7 +860,7 @@ async function main() {
       ...camPos(time), pivotZ,
       grid[0], grid[1], info.haze?.beta ?? 0, look.baked,
       look.sun ? 1 : 0, look.rays, caveDepth, 0,
-      ...sunScreen(look), look.sun ? skyBoost : 0, 0,
+      ...sunScreen(look), look.sun ? skyBoost : 0, sunFloor,
       ...scanUniforms(graphOut.scan),
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
