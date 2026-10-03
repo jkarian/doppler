@@ -225,7 +225,8 @@
     "enabled": 1,
     "maxArc": 34,
     "floorLight": 0,
-    "gain": 3
+    "gain": 3,
+    "bounce": 0.5
    }
   },
   {

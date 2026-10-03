@@ -114,7 +114,7 @@ export interface RenderOut {
   scan?: ScanOut;
   lasers?: LaserOut[];
   skyLasers?: SkyLaserOut[];
-  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number; floor: number };
+  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number; floor: number; floorBelow: number; bounce: number };
   camera?: { swayX: number; swayY: number; pushZ: number };
   tone?: { baseDim: number; baked: number; cap: number };
 }
@@ -605,7 +605,9 @@ const defs: NodeDef[] = [
       { name: "skyBoost", default: 0 },
       { name: "enabled", default: 1, kind: "const", min: 0, max: 1, step: 1 },
       { name: "gain", default: 1, min: 0, max: 10, step: 0.05, doc: "multiplies the sun's brightness (on top of whatever drives intensity)" },
-      { name: "floorLight", default: 1, min: 0, max: 1, step: 0.05, doc: "how much sun flat ground (floor, river, ledge tops) gets: 0 = none, the sun lights only the walls" },
+      { name: "floorLight", default: 1, min: 0, max: 1, step: 0.05, doc: "how much sun the floor gets (flat ground below floorBelow, and the cave floor around us): 0 = none" },
+      { name: "bounce", default: 0, min: 0, max: 2, step: 0.05, doc: "warm light thrown back by sunlit rock and sky into the faces turned away from the sun (stronger the higher it is)" },
+      { name: "floorBelow", default: -1500, min: -10000, max: 5000, step: 50, doc: "feet relative to the camera: flat ground lower than this counts as floor (plateau tops above it still get sun)" },
       { name: "maxArc", default: 180, min: 0, max: 180, step: 0.5, doc: "degrees: the sun never goes higher (low enough, it lights only the walls). It eases into this ceiling over the last 6 degrees instead of stopping dead." },
       { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
@@ -614,7 +616,7 @@ const defs: NodeDef[] = [
       const k = clamp(num(i.level), 0, 1);
       ctx.out.sun = {
         on: num(i.enabled) > 0.5 && k > 0.001, arc: softCeiling(num(i.arc), num(i.maxArc), 6), azimuth: num(i.azimuth),
-        intensity: Math.max(0, num(i.intensity)) * Math.max(0, num(i.gain)) * k, floor: clamp(num(i.floorLight), 0, 1),
+        intensity: Math.max(0, num(i.intensity)) * Math.max(0, num(i.gain)) * k, floor: clamp(num(i.floorLight), 0, 1), floorBelow: num(i.floorBelow), bounce: Math.max(0, num(i.bounce)),
         color: vec(i.color), rays: Math.max(0, num(i.rays)) * k, flare: Math.max(0, num(i.flare)) * k, skyBoost: num(i.skyBoost) * k,
       };
       return {};

@@ -39,7 +39,8 @@ struct Uniforms {
   scanColor: vec4f,    // rgb, intensity
   scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), -
   skyA: vec4f,         // sky gradient: mix with the photo, brightness, clouds, glow around the sun
-  skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), -
+  skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
+  sunB: vec4f,         // bounce light strength, -, -, -
 };
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
@@ -564,7 +565,9 @@ fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool) ->
     // Sun: everything behind a surface is solid rock.
     // Sun: rock is solid for a while behind its surface (twice its distance), so the cave walls block
     // light, but far canyon rays passing well behind the cave mouth aren't blocked by it.
-    let thickness = select(q.z * 0.35, d * 2.0, enclosed);
+    // Far terrain is thinner: beyond the cave, a ray passing a little behind a distant ridge is over it, not
+    // inside it, so plateau tops and upper walls catch a high sun.
+    let thickness = select(q.z * 0.35, d * mix(2.0, 0.15, smoothstep(u.caveDepth, u.caveDepth * 3.0, d)), enclosed);
     if (gap > bias && gap < thickness) {
       lit = min(lit, 1.0 - smoothstep(bias, bias * 1.5, gap));
       if (enclosed && lit <= 0.0) { return 0.0; }
@@ -597,9 +600,12 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
   var vis2 = select(textureSampleLevel(shadowTex2, samp, uv, 0.0), vec4f(1.0), u.shadows < 0.5);
   let shadow = vis.r;
   let haze = exp(-u.hazeBeta * z);
-  // Sun on flat ground (canyon floor, river, ledge tops: normals pointing up) can be held back so it
-  // lights only the walls, however high it climbs.
-  let floorK = select(1.0, mix(1.0, u.sunFloor, smoothstep(0.55, 0.85, n.y)), u.sun > 0.5);
+  // Sun on the floor can be held back so it lights the walls and high ground, however high it climbs.
+  // Floor: flat ground (normal pointing up) that is low (the canyon floor, the river) or part of the cave
+  // around us. Plateau tops and high ledges are flat too, but stay lit.
+  let flat = smoothstep(0.55, 0.85, n.y);
+  let low = max(1.0 - smoothstep(u.skyB.w - 0.02 * z, u.skyB.w + 0.02 * z, p.y), 1.0 - smoothstep(u.caveDepth * 0.8, u.caveDepth, z));
+  let floorK = select(1.0, mix(1.0, u.sunFloor, flat * low), u.sun > 0.5);
   var nook = vec3f(0.0);
   for (var i = 0u; i < min(nooks.count, 16u); i++) {
     let toL = nooks.l[i].pos - p;
@@ -611,7 +617,14 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
       nook += nooks.l[i].color * (nookFall(d, nooks.l[i].radius) * nl * sh);
     }
   }
-  let light = select(u.lightColor * (u.intensity * ndl * hit.amount * shadow * haze * floorK) + nook * haze, vec3f(0.0), sky);
+  // Bounce: sunlit rock and the bright sky throw warm light into faces turned away from the sun (and into
+  // its shadows), more the higher the sun is. Faces turned up catch more of it.
+  var bounce = 0.0;
+  if (u.sun > 0.5 && u.sunB.x > 0.0) {
+    let up = smoothstep(-5.0, 30.0, u.skyB.x);
+    bounce = u.sunB.x * up * (1.0 - ndl * shadow) * (0.6 + 0.4 * max(n.y, 0.0));
+  }
+  let light = select(u.lightColor * (u.intensity * (ndl * hit.amount * shadow + 0.25 * bounce) * haze * floorK) + nook * haze, vec3f(0.0), sky);
 
   // Base: the de-lit rock under soft night-sky light from above (cool) and bounce from below (warm),
   // so the photo's own daylight, haze and sun shafts don't show. `baked` mixes the photo back in.

@@ -222,7 +222,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 64;
+  const UNIFORM_FLOATS = 68;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
   const LASER_FLOATS = 4 + 4 * 24 + 192 * 4;
   const laserData = new Float32Array(LASER_FLOATS);
@@ -885,6 +885,7 @@ async function main() {
       ...sunScreen(look), look.sun ? skyBoost : 0, sunFloor,
       ...scanUniforms(graphOut.scan),
       ...skyUniforms(),
+      look.sun ? graphOut.sun?.bounce ?? 0 : 0, 0, 0, 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
@@ -928,10 +929,10 @@ async function main() {
   // sun itself is switched off, so the sky keeps its colour.
   const skyUniforms = (): number[] => {
     const S = graphOut.sky;
-    if (!S) return [0, 0, 0, 0, 0, 0, 1, 0];
+    if (!S) return [0, 0, 0, 0, 0, 0, 1, (graphOut.sun?.floorBelow ?? -1500) / feetPerUnit];
     const arc = graphOut.sun?.arc ?? look.sunElevation;
     const elev = arc <= 90 ? arc : 180 - arc;
-    return [S.mix, S.brightness, S.clouds, S.glow, elev - gapHorizon, (gapHorizon * Math.PI) / 180, (S.span * Math.PI) / 180, 0];
+    return [S.mix, S.brightness, S.clouds, S.glow, elev - gapHorizon, (gapHorizon * Math.PI) / 180, (S.span * Math.PI) / 180, (graphOut.sun?.floorBelow ?? -1500) / feetPerUnit];
   };
 
   // Scan: map the node's 0..1 position and spacing onto the land's range on its axis
