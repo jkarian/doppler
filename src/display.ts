@@ -429,7 +429,7 @@ async function main() {
     const b = waypoint(i + 1);
     const target = a.map((x, j) => x + (b[j] - x) * ease) as Vec3;
     const sec = music.section(t);
-    const sectionGain = { quiet: 0.6, build: 0.8 + 0.4 * sec.progress, drop: 1.2, normal: 1 }[sec.kind];
+    const sectionGain = { quiet: 0.6, build: 0.8 + 0.4 * sec.progress, drop: 1.2, normal: 1 }[sec.mood];
     const flash = music.beatPulse(t, 0.18) * (sec.kind === "drop" ? 1.2 : 0.5);
     return {
       ...look,
@@ -878,7 +878,7 @@ async function main() {
     const sec = music.section(time);
     return (
       `${trackName}  ${audio.paused ? "paused" : "playing"}  ${time.toFixed(2)} s  bar ${music.bar(time).toFixed(2)}  ` +
-      `${sec.kind} ${(sec.progress * 100).toFixed(0)}%  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
+`${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
       `space play · J L seek · { } offset · A auto light\n`
     );
   };

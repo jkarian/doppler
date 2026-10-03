@@ -2,15 +2,23 @@
 
     python tools/audio_analysis.py tracks/song.mp3    (any audio, or a video's audio track: decoded with ffmpeg)
 
-The file holds:
-    beats       beat times, seconds
-    downbeats   bar starts (assumes 4/4; phase picked by where the low end hits hardest)
+Version 2. The file holds:
+    tempo       BPM of the beat grid
+    beats       beat times, seconds: a steady grid (Beat This! fitted to constant-tempo pieces, on the kick)
+    downbeats   bar starts
+    grid        {pieces, confident, agreement, drum_share}: confident is false for drumless tracks
+                like Bliss, where beat-locked effects should back off
+    phrases     {bars_per_phrase, starts}: the 8-bar phrase grid
+    sections    [{start, end, kind, energy}], kind = intro | build | drop | breakdown | normal | outro
+    drops       [{t, bar, confidence, contrast, gap_bars_before, fill_before}]
+    curves      {rate, energy (held per bar), tension, build, until_drop, until_phrase}: -1 = none ahead
     loudness    0..1 perceived loudness at `rate` values per second
     intensity   0..1 loudness plus brightness (filters opening, high layers): structure of flat-mastered tracks
     sub         0..1 kick and sub-bass (25-65 Hz): drops out before techno drops
     bass        0..1 energy under ~150 Hz, same rate
     hats        [time, strength] of high-frequency hits (hats, shakers), for flicker
-    sections    [{start, end, kind}] with kind = quiet | build | drop | normal
+
+Structure (grid, phrases, sections, drops, curves) comes from music_structure.py.
 """
 
 import argparse
@@ -21,20 +29,22 @@ import librosa
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
+from music_structure import STEM_SR, analyse_structure
+
 SR = 22050
 HOP = 512
 BEAT_HOP = 128  # beat periods are whole frames: 128 samples keeps tempo error under 0.5%
 LOUDNESS_RATE = 20  # values per second in the output
 
 
-def load_audio(path: Path) -> np.ndarray:
-    """Decode any audio or video file to mono float32 at SR, through the ffmpeg bundled with imageio-ffmpeg."""
+def load_audio(path: Path, sr: int = SR, channels: int = 1) -> np.ndarray:
+    """Decode any audio or video file to float32 (interleaved if stereo), through the ffmpeg bundled with imageio-ffmpeg."""
     import subprocess
 
     import imageio_ffmpeg
 
     raw = subprocess.run(
-        [imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"],
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", str(path), "-vn", "-ac", str(channels), "-ar", str(sr), "-f", "f32le", "-"],
         check=True,
         capture_output=True,
     ).stdout
@@ -46,58 +56,10 @@ def analyse(path: Path) -> dict:
     duration = len(y) / sr
     frame_rate = sr / HOP
 
-    # Beats from the onset envelope.
-    onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=BEAT_HOP)
-    tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset, sr=sr, hop_length=BEAT_HOP, trim=False)
-    beats = librosa.frames_to_time(beat_frames, sr=sr, hop_length=BEAT_HOP)
-
-    # Bass energy (under ~150 Hz): kicks and bass lines. Drops are mostly the low end coming back.
+    # Bass energy (under ~150 Hz): kicks and bass lines.
     mel = librosa.feature.melspectrogram(y=y, sr=sr, hop_length=HOP, fmax=150, n_mels=8)
     bass_db = librosa.power_to_db(mel.sum(axis=0), ref=np.max)
     bass = np.clip((bass_db + 50) / 50, 0, 1)
-
-    bass_onset = np.maximum(0, np.diff(bass, prepend=bass[0]))
-
-    # The tracker can lock onto off-beat hats. Shift all beats by the offset (within half a beat)
-    # that best lines them up with bass hits.
-    if len(beats) >= 8:
-        period = float(np.median(np.diff(beats)))
-        bass_t = librosa.frames_to_time(np.arange(len(bass_onset)), sr=sr, hop_length=HOP)
-        onset_t = librosa.frames_to_time(np.arange(len(onset)), sr=sr, hop_length=BEAT_HOP)
-        norm = lambda a: a / (a.max() + 1e-9)
-        offsets = np.arange(-period / 2, period / 2, 0.005)
-        bass_score = np.array([np.interp(beats + o, bass_t, norm(bass_onset)).sum() for o in offsets])
-        # Bass decides when it has a clear peak; otherwise fall back to all onsets (hats would outvote kicks).
-        if bass_score.max() > 1.5 * np.median(bass_score):
-            score = bass_score
-        else:
-            score = np.array([np.interp(beats + o, onset_t, norm(onset)).sum() for o in offsets])
-        beats = np.clip(beats + offsets[int(np.argmax(score))], 0, duration)
-
-        # Fine timing: the bass search works on 23 ms frames. Shift every beat by the median distance
-        # to the nearest onset peak (5.8 ms frames), so beats land on the attack, not just near it.
-        to_peak = []
-        for b in beats:
-            m = (onset_t > b - 0.06) & (onset_t < b + 0.06)
-            if m.any():
-                to_peak.append(onset_t[m][np.argmax(onset[m])] - b)
-        if to_peak:
-            beats = np.clip(beats + float(np.median(to_peak)), 0, duration)
-
-    # Downbeats: the beat phase (of 4) that best starts bars. Bars start with a bass hit and a harmony
-    # change; snares (beats 2 and 4) carry low end too, so broadband hits count against a phase.
-    from scipy.ndimage import maximum_filter1d
-
-    norm = lambda a: a / (np.max(a) + 1e-9)
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=HOP)
-    harmony = norm(np.r_[0, np.linalg.norm(np.diff(uniform_filter1d(chroma, 9, axis=1), axis=1), axis=0)])
-    high = librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP, fmax=None, feature=librosa.feature.melspectrogram, n_mels=32, fmin=2000)
-    beat_idx = librosa.time_to_frames(beats, sr=sr, hop_length=HOP).clip(0, len(bass_onset) - 1)
-    near = lambda a: maximum_filter1d(a, 5)[beat_idx[: len(beat_idx)]]  # strongest within +-2 frames
-    n = min(len(bass_onset), len(harmony), len(high))
-    per_beat = near(norm(bass_onset[:n])) + near(harmony[:n]) - 0.5 * near(norm(high[:n]))
-    phase = int(np.argmax([per_beat[p::4].mean() for p in range(4)])) if len(beats) >= 8 else 0
-    downbeats = beats[phase::4]
 
     # Loudness: RMS in dB over a 40 dB window below the peak, mapped to 0..1.
     rms = librosa.feature.rms(y=y, hop_length=HOP)[0]
@@ -126,41 +88,26 @@ def analyse(path: Path) -> dict:
     intensity_curve = np.interp(times, frame_times[: len(intensity)], intensity[: len(frame_times)])
 
     hats = find_hats(y, sr)
-    # Half loudness, half intensity: loudness carries the structure of dynamic tracks, intensity of flat ones.
-    sections = find_sections(0.5 * loudness + 0.5 * intensity_curve, bass_curve, LOUDNESS_RATE, duration, kick_returns(sub_curve, LOUDNESS_RATE))
-    # A drop starts on its first big hit: move each drop to the beat with the strongest bass attack
-    # within a beat of where the loudness curves put it (smoothing makes those land a little late).
-    attack = maximum_filter1d(norm(bass_onset), 5)
-    beat_period = float(np.median(np.diff(beats))) if len(beats) > 1 else 0.5
-    for sec in sections:
-        if sec["kind"] == "drop" and len(beats):
-            near_beats = beats[np.abs(beats - sec["start"]) <= 1.01 * beat_period]
-            if len(near_beats):
-                idx = librosa.time_to_frames(near_beats, sr=sr, hop_length=HOP).clip(0, len(attack) - 1)
-                sec["start"] = round(float(near_beats[np.argmax(attack[idx])]), 3)
-
-    # Snap section boundaries to the nearest beat (beats are accurate; bar starts are a guess).
-    for sec in sections[1:]:
-        if len(beats):
-            nearest = float(beats[np.argmin(np.abs(beats - sec["start"]))])
-            if abs(nearest - sec["start"]) <= 0.6 * np.median(np.diff(beats)):
-                sec["start"] = round(nearest, 3)
-    for a, b in zip(sections, sections[1:]):
-        a["end"] = b["start"]
+    structure = analyse_structure(y, load_audio(path, sr=STEM_SR, channels=2).reshape(-1, 2), duration)
+    r3 = lambda a: [round(float(b), 3) for b in a]
     return {
-        "version": 1,
+        "version": 2,
         "track": path.name,
         "duration": round(duration, 3),
-        # From the actual beat spacing: the tracker's own tempo figure is rounded to its frame grid.
-        "tempo": round(60 / float(np.median(np.diff(beats))), 2) if len(beats) > 1 else round(float(np.atleast_1d(tempo)[0]), 2),
-        "beats": [round(float(b), 3) for b in beats],
-        "downbeats": [round(float(b), 3) for b in downbeats],
+        "tempo": round(float(structure["tempo"]), 3),
+        "beats": r3(structure["beats"]),
+        "downbeats": r3(structure["downbeats"]),
+        "grid": structure["grid"],
+        "phrases": structure["phrases"],
+        "sections": structure["sections"],
+        "drops": structure["drops"],
+        "curves": structure["curves"],
         "loudness": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in loudness]},
         "bass": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in bass_curve]},
         "sub": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in sub_curve]},
         "intensity": {"rate": LOUDNESS_RATE, "values": [round(float(v), 3) for v in intensity_curve]},
-        "sections": sections,
         "hats": hats,
+        "debug": structure["debug"],
     }
 
 
@@ -176,80 +123,6 @@ def find_hats(y: np.ndarray, sr: int) -> list[list[float]]:
     return [[round(float(t), 3), round(float(min(1.0, high[p])), 2)] for t, p in zip(times, peaks) if high[p] > 0.2]
 
 
-def kick_returns(sub: np.ndarray, rate: int) -> list[int]:
-    """Indices where the kick (sub-bass) slams back after cutting out for at least half a second,
-    in a stretch where it's otherwise present: the techno drop."""
-    s = uniform_filter1d(sub, size=max(1, rate // 4))
-    out, start = [], None
-    for i, v in enumerate(s):
-        if v < 0.35 and start is None:
-            start = i
-        elif v > 0.6 and start is not None:
-            context = s[max(0, start - 4 * rate) : start]
-            if i - start >= rate // 2 and len(context) and np.median(context) > 0.6:
-                out.append(i)
-            start = None
-    return out
-
-
-def find_sections(energy_curve: np.ndarray, bass: np.ndarray, rate: int, duration: float, extra_drops: list[int] = ()) -> list[dict]:
-    """Label quiet, build and drop stretches from the slow intensity and bass envelopes, plus any
-    drops found elsewhere (kick returns)."""
-    energy = uniform_filter1d(energy_curve, size=2 * rate)  # 2 s window
-    lo, hi = np.percentile(energy, [10, 90])
-    span = max(hi - lo, 1e-3)
-    labels = np.full(len(energy), "normal", dtype=object)
-    labels[energy < lo + 0.3 * span] = "quiet"
-
-    # Drops: the bass jumps within about a second and the track lands loud.
-    low = uniform_filter1d(bass, size=rate)
-    after = np.roll(low, -rate)
-    before = np.maximum.reduce([np.roll(low, k) for k in range(rate, 3 * rate, rate // 2)])
-    jump = after - before
-    jump[: 3 * rate] = jump[-rate:] = 0
-    candidates = np.where((jump > 0.15) & (np.roll(energy, -rate) > lo + 0.6 * span))[0]
-    drops = sorted(extra_drops)
-    for d in list(drops):
-        candidates = candidates[np.abs(candidates - d) > 8 * rate]
-    for i in candidates:
-        if not drops or min(abs(i - d) for d in drops) > 8 * rate:
-            # The drop lands where the bass rises most over a quarter second in this stretch.
-            q = max(1, rate // 4)
-            window = np.arange(max(0, i - rate), min(len(bass) - q, i + 2 * rate))
-            drops.append(int(window[np.argmax(bass[window + q] - bass[window])]) + 1)
-    drops = sorted(drops)
-    for d in drops:
-        # Drop lasts while energy stays in the upper half. Start checking a second in:
-        # the 2 s energy window still remembers any silence just before the drop.
-        end = min(len(energy), d + rate)
-        while end < len(energy) and energy[end] > lo + 0.5 * span:
-            end += 1
-        labels[d:end] = "drop"
-        # Build: back from the drop to the last low point, up to 16 s. Skip the last 2 s:
-        # producers often cut to near-silence right before a drop, which is part of the build.
-        start, stop = max(0, d - 16 * rate), max(0, d - 2 * rate)
-        low_point = start + int(np.argmin(energy[start:stop])) if stop > start else d
-        labels[low_point:d] = "build"
-
-    # Run-length encode, then fold stretches under 2 s into the previous one.
-    sections: list[dict] = []
-    for i, kind in enumerate(labels):
-        if sections and sections[-1]["kind"] == kind:
-            continue
-        sections.append({"start": round(i / rate, 2), "kind": kind})
-    merged: list[dict] = []
-    for s in sections:
-        if merged and (s["start"] - merged[-1]["start"] < 2 and merged[-1]["kind"] not in ("drop", "build")):
-            merged[-1]["kind"] = s["kind"]
-            continue
-        if merged and merged[-1]["kind"] == s["kind"]:
-            continue
-        merged.append(s)
-    for a, b in zip(merged, merged[1:] + [{"start": round(duration, 2)}]):
-        a["end"] = b["start"]
-    return merged
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("tracks", type=Path, nargs="+")
@@ -259,7 +132,9 @@ def main() -> None:
         out = track.with_name(track.name + ".analysis.json")
         out.write_text(json.dumps(result, separators=(",", ":")))
         summary = ", ".join(f"{s['kind']} {s['start']:.1f}-{s['end']:.1f}" for s in result["sections"])
-        print(f"{track.name}: {result['tempo']} BPM, {len(result['beats'])} beats -> {out.name}\n  {summary}")
+        drops = ", ".join(f"{d['t']:.2f} ({d['confidence']:.2f})" for d in result["drops"])
+        grid = "steady grid" if result["grid"]["confident"] else "NO reliable grid"
+        print(f"{track.name}: {result['tempo']} BPM ({grid}), {len(result['beats'])} beats -> {out.name}\n  {summary}\n  drops: {drops}")
 
 
 if __name__ == "__main__":

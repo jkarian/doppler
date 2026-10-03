@@ -136,13 +136,15 @@ const defs: NodeDef[] = [
   {
     type: "Beat",
     category: "Music",
-    doc: "Position in the beat grid: count (fractional), phase 0..1 within the beat, and a pulse that hits 1 on each beat and decays (bass-weighted).",
+    doc:
+      "Position in the beat grid: count (fractional), phase 0..1 within the beat, a pulse that hits 1 on each beat and decays (bass-weighted), " +
+      "and confidence: 1 when the grid can be trusted, 0 on drumless tracks (multiply beat-locked effects by it).",
     inputs: [{ name: "decay", default: 0.12, kind: "const", min: 0.01, max: 2, step: 0.01, doc: "pulse decay, seconds" }],
-    outputs: ["count", "phase", "pulse"],
+    outputs: ["count", "phase", "pulse", "confidence"],
     eval: (i, ctx) => {
-      if (!ctx.music) return { count: ctx.t * 2, phase: (ctx.t * 2) % 1, pulse: 0 };
+      if (!ctx.music) return { count: ctx.t * 2, phase: (ctx.t * 2) % 1, pulse: 0, confidence: 1 };
       const c = ctx.music.beat(ctx.t);
-      return { count: c, phase: c - Math.floor(c), pulse: ctx.music.beatPulse(ctx.t, num(i.decay)) };
+      return { count: c, phase: c - Math.floor(c), pulse: ctx.music.beatPulse(ctx.t, num(i.decay)), confidence: ctx.music.gridConfidence() };
     },
   },
   {
@@ -202,7 +204,9 @@ const defs: NodeDef[] = [
   {
     type: "Section",
     category: "Music",
-    doc: "A value per kind of section (builds go from start to end), eased over `ease` seconds so changes glide. Also the section's progress 0..1.",
+    doc:
+      "A value per kind of section (builds go from start to end; intros, breakdowns and outros count as quiet), eased over `ease` seconds " +
+      "so changes glide. Also the section's progress 0..1.",
     inputs: [
       { name: "quiet", default: 0, kind: "const", step: 0.1 },
       { name: "buildStart", default: 0, kind: "const", step: 0.1 },
@@ -217,8 +221,8 @@ const defs: NodeDef[] = [
       if (!m) return { value: num(i.normal), progress: 0 };
       const at = (t: number) => {
         const s = m.section(t);
-        if (s.kind === "build") return num(i.buildStart) + (num(i.buildEnd) - num(i.buildStart)) * s.progress;
-        return num(i[s.kind]);
+        if (s.mood === "build") return num(i.buildStart) + (num(i.buildEnd) - num(i.buildStart)) * s.progress;
+        return num(i[s.mood]);
       };
       const n = 8;
       const span = num(i.ease);
@@ -230,12 +234,60 @@ const defs: NodeDef[] = [
   {
     type: "DropHit",
     category: "Music",
-    doc: "Since the last drop: seconds, and a hit that is 1 at the drop and decays.",
-    inputs: [{ name: "decay", default: 0.8, kind: "const", min: 0.05, max: 10, step: 0.05 }],
-    outputs: ["seconds", "hit"],
+    doc:
+      "Drops: seconds since the last one, a hit that is 1 at the drop and decays, the hit scaled by how sure the analysis is (strength), " +
+      "seconds until the next one (ahead, 1e6 if none), and a wind-up that eases from 0 to 1 over the last `window` bars before it.",
+    inputs: [
+      { name: "decay", default: 0.8, kind: "const", min: 0.05, max: 10, step: 0.05 },
+      { name: "window", default: 4, kind: "const", min: 0.5, max: 32, step: 0.5, doc: "bars of wind-up before a drop" },
+    ],
+    outputs: ["seconds", "hit", "strength", "ahead", "windup"],
     eval: (i, ctx) => {
-      const s = ctx.music ? ctx.music.sinceDrop(ctx.t) : Infinity;
-      return { seconds: Number.isFinite(s) ? s : 1e6, hit: Math.exp(-s / num(i.decay)) };
+      const m = ctx.music;
+      if (!m) return { seconds: 1e6, hit: 0, strength: 0, ahead: 1e6, windup: 0 };
+      const last = m.lastDrop(ctx.t);
+      const next = m.nextDrop(ctx.t);
+      const hit = Math.exp(-last.since / num(i.decay));
+      const span = num(i.window) * m.phrase(ctx.t).length / ((m.a.phrases?.bars_per_phrase ?? 8));
+      const x = Number.isFinite(next.until) ? clamp(1 - next.until / span, 0, 1) : 0;
+      return {
+        seconds: Number.isFinite(last.since) ? last.since : 1e6,
+        hit,
+        strength: hit * (last.drop?.confidence ?? 0),
+        ahead: Number.isFinite(next.until) ? next.until : 1e6,
+        windup: x * x * (3 - 2 * x),
+      };
+    },
+  },
+  {
+    type: "Phrase",
+    category: "Music",
+    doc:
+      "Position in the phrase grid (usually 8 bars; sections change on phrase lines): count (fractional), bar 0..8 within the phrase, " +
+      "progress 0..1, and a pulse that is 1 at each phrase start and decays.",
+    inputs: [{ name: "decay", default: 1.5, kind: "const", min: 0.05, max: 10, step: 0.05, doc: "pulse decay, seconds" }],
+    outputs: ["count", "bar", "progress", "pulse"],
+    eval: (i, ctx) => {
+      if (!ctx.music) {
+        const c = ctx.t / 16;
+        return { count: c, bar: (c % 1) * 8, progress: c % 1, pulse: Math.exp(-((c % 1) * 16) / num(i.decay)) };
+      }
+      const p = ctx.music.phrase(ctx.t);
+      return { count: p.count, bar: p.bar, progress: p.since / p.length, pulse: Math.exp(-p.since / num(i.decay)) };
+    },
+  },
+  {
+    type: "Tension",
+    category: "Music",
+    doc:
+      "Anticipation: tension 0..1 (rises through builds and the last bars before a drop, releases over ~2.5 s after it), " +
+      "build progress 0..1, and energy 0..1 (how big each bar is, held per bar so it never leaks before a drop).",
+    inputs: [],
+    outputs: ["tension", "build", "energy"],
+    eval: (_i, ctx) => {
+      const m = ctx.music;
+      if (!m) return { tension: 0, build: 0, energy: 1 };
+      return { tension: m.tension(ctx.t), build: m.buildProgress(ctx.t), energy: m.barEnergy(ctx.t) };
     },
   },
   {

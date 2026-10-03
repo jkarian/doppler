@@ -10,14 +10,34 @@ export interface Analysis {
   bass: { rate: number; values: number[] };
   sub?: { rate: number; values: number[] }; // kick and sub-bass, 0..1 over the track's range
   intensity?: { rate: number; values: number[] }; // loudness plus brightness, 0..1
-  sections: { start: number; end: number; kind: SectionKind }[];
+  sections: { start: number; end: number; kind: SectionKind; energy?: number }[];
   hats?: [number, number][]; // high-frequency hits: [time, strength]
+  // Version 2 (tools/music_structure.py):
+  grid?: { confident: boolean; agreement: number; drum_share: number };
+  phrases?: { bars_per_phrase: number; starts: number[] };
+  drops?: Drop[];
+  curves?: { rate: number; energy: number[]; tension: number[]; build: number[] };
 }
 
-export type SectionKind = "quiet" | "build" | "drop" | "normal";
+export interface Drop {
+  t: number;
+  bar: number;
+  confidence: number; // 0..1
+  contrast: number; // energy jump into the drop
+  gap_bars_before: number; // bars with the bass cut just before it
+  fill_before: boolean; // drum fill in the bar before
+}
+
+/** Version 1 files have quiet | build | drop | normal; version 2 adds intro, breakdown and outro. */
+export type SectionKind = "quiet" | "intro" | "breakdown" | "outro" | "build" | "drop" | "normal";
+
+/** The four broad moods: intro, breakdown and outro all count as quiet. */
+export type Mood = "quiet" | "build" | "drop" | "normal";
+export const mood = (k: SectionKind): Mood => (k === "intro" || k === "breakdown" || k === "outro" ? "quiet" : k);
 
 export interface Section {
   kind: SectionKind;
+  mood: Mood;
   start: number;
   end: number;
   progress: number; // 0..1 through the section
@@ -75,9 +95,13 @@ export class Music {
   findSpurts(opt: Partial<SpurtOptions> = {}): Spurt[] {
     const o = { ...SPURT_DEFAULTS, ...opt };
     const MIN_GAP = o.minGap;
-    const drops = this.a.sections.filter((s) => s.kind === "drop").map((s) => s.start);
-    // Drops always get a big spurt.
-    const candidates: (Spurt & { drop: boolean })[] = drops.map((t, i) => ({ t, deg: o.dropMin + (o.dropMax - o.dropMin) * seeded(9000 + i)(), drop: true }));
+    const drops = this.drops().map((d) => d.t);
+    // Drops always get a big spurt; a less certain drop (version 2 files) a smaller one.
+    const candidates: (Spurt & { drop: boolean })[] = this.drops().map((d, i) => ({
+      t: d.t,
+      deg: (o.dropMin + (o.dropMax - o.dropMin) * seeded(9000 + i)()) * (0.6 + 0.4 * d.confidence),
+      drop: true,
+    }));
     for (const [i, t] of this.a.downbeats.entries()) {
       // A hit: the low end punching in, or the music getting noticeably more intense than a bar ago.
       const hit = Math.max(
@@ -86,7 +110,7 @@ export class Music {
         (this.energy(t + 1, 1) - this.energy(t - 1, 2)) * 0.8,
       );
       const sec = this.section(t);
-      if (sec.kind === "quiet" || !(hit > 0.05 || (sec.kind === "drop" && this.bass(t + 0.05) > 0.6))) continue;
+      if (sec.mood === "quiet" || !(hit > 0.05 || (sec.kind === "drop" && this.bass(t + 0.05) > 0.6))) continue;
       const intensity = 0.4 + 0.6 * this.energy(t, 1);
       candidates.push({ t, deg: (o.sizeMin + (o.sizeMax - o.sizeMin) * seeded(5000 + i)()) * intensity, drop: false });
     }
@@ -189,15 +213,73 @@ export class Music {
 
   section(t: number): Section {
     const s = this.a.sections.find((s) => t >= s.start && t < s.end) ?? this.a.sections.at(-1);
-    if (!s) return { kind: "normal", start: 0, end: this.a.duration, progress: 0 };
-    return { ...s, progress: clamp01((t - s.start) / Math.max(s.end - s.start, 1e-3)) };
+    if (!s) return { kind: "normal", mood: "normal", start: 0, end: this.a.duration, progress: 0 };
+    return { ...s, mood: mood(s.kind), progress: clamp01((t - s.start) / Math.max(s.end - s.start, 1e-3)) };
+  }
+
+  /** The drops: from the analysis (version 2), or the starts of drop sections (version 1, confidence 1). */
+  drops(): Drop[] {
+    return (this.dropList ??=
+      this.a.drops ??
+      this.a.sections
+        .filter((s) => s.kind === "drop")
+        .map((s) => ({ t: s.start, bar: Math.round(this.bar(s.start)), confidence: 1, contrast: 0, gap_bars_before: 0, fill_before: false })));
+  }
+  private dropList?: Drop[];
+
+  /** The most recent drop at or before t, and seconds since it (Infinity if none yet). */
+  lastDrop(t: number): { drop: Drop | null; since: number } {
+    const d = this.drops();
+    let i = d.length - 1;
+    while (i >= 0 && d[i].t > t) i--;
+    return i >= 0 ? { drop: d[i], since: t - d[i].t } : { drop: null, since: Infinity };
   }
 
   /** Seconds since the most recent drop started (Infinity if none yet). */
   sinceDrop(t: number): number {
-    let since = Infinity;
-    for (const s of this.a.sections) if (s.kind === "drop" && s.start <= t) since = t - s.start;
-    return since;
+    return this.lastDrop(t).since;
+  }
+
+  /** The next drop after t, and seconds until it (Infinity if none ahead). */
+  nextDrop(t: number): { drop: Drop | null; until: number } {
+    const d = this.drops().find((d) => d.t > t);
+    return d ? { drop: d, until: d.t - t } : { drop: null, until: Infinity };
+  }
+
+  /** 1 when the beat grid can be trusted, 0 for drumless tracks without one (version 1 files: 1). */
+  gridConfidence(): number {
+    return this.a.grid ? (this.a.grid.confident ? 1 : 0) : 1;
+  }
+
+  /** Position in the phrase grid: phrases since the first (fractional), bars into the current phrase,
+   *  the phrase length in seconds, and seconds since the phrase started. */
+  phrase(t: number): { count: number; bar: number; length: number; since: number } {
+    const per = this.a.phrases?.bars_per_phrase ?? 8;
+    const barLen = this.period * 4;
+    const starts = this.a.phrases?.starts;
+    const c = starts?.length ? this.position(starts, t, per * barLen) : this.bar(t) / per;
+    const bar = (c - Math.floor(c)) * per;
+    return { count: c, bar, length: per * barLen, since: bar * barLen };
+  }
+
+  /** Tension, 0..1: rises through builds and the last bars before a drop, releases over ~2.5 s after it. */
+  tension(t: number): number {
+    return this.a.curves ? sampleCurve({ rate: this.a.curves.rate, values: this.a.curves.tension }, t) : 0;
+  }
+
+  /** How far through the current build, 0..1 (0 outside builds). */
+  buildProgress(t: number): number {
+    if (this.a.curves) return sampleCurve({ rate: this.a.curves.rate, values: this.a.curves.build }, t);
+    const s = this.section(t);
+    return s.kind === "build" ? s.progress : 0;
+  }
+
+  /** How big the music is this bar, 0..1, held per bar (never blended across a boundary). */
+  barEnergy(t: number): number {
+    const c = this.a.curves;
+    if (!c) return this.energy(t, 2);
+    const i = Math.min(c.energy.length - 1, Math.max(0, Math.floor(t * c.rate)));
+    return c.energy[i] ?? 0;
   }
 }
 
