@@ -103,10 +103,22 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
   let cols = u32(u.grid.x);
   let quad = i / 6u;
   let corner = array(vec2u(0, 0), vec2u(1, 0), vec2u(0, 1), vec2u(0, 1), vec2u(1, 0), vec2u(1, 1))[i % 6u];
-  let g = vec2u(quad % cols, quad / cols) + corner;
+  let g0 = vec2u(quad % cols, quad / cols);
+  let g = g0 + corner;
   let uv = vec2f(g) / u.grid;
 
-  let pc = viewPos(uv, depthAt(uv)) - u.camPos;
+  // A square whose corners sit at very different depths spans a silhouette (near rock against far
+  // canyon), not a surface: stretched by parallax it smears into hairs. Put the whole square at the
+  // far side's depth so the near edge stays crisp and nothing stretches across the gap.
+  let d00 = depthAt(vec2f(g0) / u.grid);
+  let d10 = depthAt(vec2f(g0 + vec2u(1, 0)) / u.grid);
+  let d01 = depthAt(vec2f(g0 + vec2u(0, 1)) / u.grid);
+  let d11 = depthAt(vec2f(g0 + vec2u(1, 1)) / u.grid);
+  let zmin = min(min(d00, d10), min(d01, d11));
+  let zmax = max(max(d00, d10), max(d01, d11));
+  let z = select(depthAt(uv), zmax, zmax > zmin * 1.08);
+
+  let pc = viewPos(uv, z) - u.camPos;
   let tanXY = vec2f(u.tanHalfFov * u.aspect, u.tanHalfFov);
   // Where this point lands in the photo's frame when seen from the moved camera,
   // shifted so the pivot depth holds still: near rock and far canyon slide in opposite directions.
