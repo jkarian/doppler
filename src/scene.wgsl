@@ -242,7 +242,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         }
       }
       // A sheet reads as a plane: its individual beams fade back.
-      g += 0.5 * glowProfile(ang / (drawAng * L.glow)) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
+      g += 2.0 * glowProfile(ang / (drawAng * L.glow)) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * reachFade(t, L.reach);
       // Hot spot where the beam lands on the rock.
       if (!sky && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
