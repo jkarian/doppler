@@ -116,6 +116,58 @@ def fill_sdxl(img: np.ndarray, band: np.ndarray, unknown: np.ndarray, prompt: st
     return out
 
 
+def load_parts(scene: Path, w: int, h: int) -> list[tuple[dict, np.ndarray]]:
+    """The scene description's parts (parts.json + parts/<name>.png from segment_parts.py), at work size."""
+    desc = scene / "parts.json"
+    if not desc.exists():
+        return []
+    out = []
+    for part in json.loads(desc.read_text())["parts"]:
+        png = scene / "parts" / f"{part['name'].replace(' ', '_')}.png"
+        if png.exists():
+            m = np.asarray(Image.open(png).convert("L").resize((w, h), Image.NEAREST)) > 127
+            out.append((part, m))
+    return out
+
+
+def separate_parts(z: np.ndarray, parts: list[tuple[dict, np.ndarray]]):
+    """Freestanding parts (a spire, a tree) stand clear of what's behind them. A single depth map drapes
+    over them like a sheet, so just outside their outline the depth slopes down toward them and the camera
+    smears them into the wall behind. For each freestanding part: find what's behind it (farther parts,
+    carried in from around it), reset the draped ring outside its outline to that depth (a hard step), and
+    give the background layer the whole part, with the depth of what's behind it.
+    Returns (depth with hard steps, ring that was reset, band of hidden rock, its depth)."""
+    L = np.log(z)
+    reset = np.zeros(z.shape, bool)
+    band = np.zeros(z.shape, bool)
+    bg = z.copy()
+    for part, m in parts:
+        if not part.get("freestanding") or not m.any():
+            continue
+        k = part["order"]
+        nearer = np.zeros_like(m)
+        for other, om in parts:
+            if other["order"] <= k:
+                nearer |= om
+        Lpart = float(np.median(L[m]))
+        # Behind: not this part or anything as near, and clearly farther than the part.
+        behind = ~nearer & (L > Lpart + np.log(1.15))
+        if not behind.any():
+            continue
+        _, (iy, ix) = ndi.distance_transform_edt(~behind, return_indices=True)
+        Lb = L[iy, ix]
+        Lb = cv2.GaussianBlur(Lb.astype(np.float32), (0, 0), 6).astype(np.float64)
+        Lb = np.maximum(Lb, Lpart + np.log(1.2))
+        ring = ndi.binary_dilation(m, iterations=10) & ~m & ~nearer
+        draped = ring & (L < Lb - np.log(1.05))
+        L[draped] = Lb[draped]
+        reset |= draped
+        band |= m
+        bg[m] = np.exp(Lb[m])
+        print(f"  {part['name']}: hidden rock behind {m.mean() * 100:.1f}% of the picture; {draped.sum()} draped pixels reset to the depth behind")
+    return np.exp(L), reset, band, bg
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("scene", type=Path)
@@ -142,7 +194,25 @@ def main() -> None:
     h = round(H * WORK_W / W)
     z = cv2.resize(z_full, (WORK_W, h), interpolation=cv2.INTER_NEAREST).astype(np.float64)
     sky = z >= far * 0.98
+    # Scene description (parts.json, from segment_parts.py): freestanding parts get a hard step all round
+    # and hidden rock behind their whole outline.
+    parts = load_parts(args.scene, WORK_W, h)
+    if parts:
+        z, reset, part_band, part_bg = separate_parts(z, parts)
+        if reset.any():
+            raw = args.scene / "depth_raw.bin"
+            if not raw.exists():
+                z_full.astype("<f4").tofile(raw)  # keep the original once
+            else:
+                z_full = np.fromfile(raw, dtype="<f4").reshape(H, W)
+            reset_full = cv2.resize(reset.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
+            z_full = np.where(reset_full, cv2.resize(z.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR), z_full).astype(np.float32)
+            z_full.astype("<f4").tofile(args.scene / info["depth"])
     band, bg, reach, unknown = find_band(z, sky, tan_half_fov, aspect, baseline, args.margin)
+    if parts:
+        band |= part_band
+        bg = np.where(part_band, part_bg, bg)
+        unknown |= part_band
     print(f"camera move up to {baseline:.4f} units; band covers {band.mean() * 100:.1f}% of the picture (reach {reach}px at {WORK_W})")
 
     def load(name: str) -> np.ndarray:
