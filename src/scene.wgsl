@@ -175,7 +175,14 @@ struct Nooks {
   l: array<Nook, 16>,
 };
 @group(0) @binding(9) var<storage, read> nooks: Nooks;
-@group(0) @binding(10) var shadowTex2: texture_2d<f32>;  // nook lights 4-7's visibility (see fs_shadow)
+@group(0) @binding(10) var shadowTex2: texture_2d<f32>;
+// The other layer's depth: the background layer's when drawing the main layer (and vice versa). The main
+// layer only drops a silhouette where the background layer has hidden rock behind it.
+@group(0) @binding(11) var otherDepthTex: texture_2d<f32>;
+fn otherDepth(uv: vec2f) -> f32 {
+  let i = clamp(vec2i(uv * u.imgSize), vec2i(0), vec2i(u.imgSize) - 1);
+  return textureLoad(otherDepthTex, i, 0).r;
+}  // nook lights 4-7's visibility (see fs_shadow)
 const NOOK_SHADOWS = 7u;
 
 // Bright at the light, easing to nothing at the radius.
@@ -401,6 +408,7 @@ fn project(p: vec3f) -> vec2f {
 struct VsOut {
   @builtin(position) pos: vec4f,
   @location(0) uv: vec2f,
+  @location(1) @interpolate(flat) layer: u32,  // 0 main, 1 background layer
 };
 
 // One vertex per mesh corner, generated from the index: no vertex buffers.
@@ -436,8 +444,16 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   // dark seams when the camera moves). The main layer's gaps are filled by the background layer's hidden
   // rock; the background layer's own silhouettes (where its band of hidden rock meets the near object it
   // sits behind) would otherwise slide out from behind that object as a ghost outline.
-  if (silhouette && u.up.w > 0.5) { out.pos = vec4f(0.0, 0.0, -1.0, 1.0); }
+  var covered = layer == 1u;
+  if (layer == 0u && silhouette && u.up.w > 0.5) {
+    for (var k = 0u; k < 4u; k++) {
+      let c = vec2f(g0 + vec2u(k & 1u, k >> 1u)) / u.grid;
+      if (otherDepth(c) > depthAt(c) * 1.05) { covered = true; }
+    }
+  }
+  if (silhouette && u.up.w > 0.5 && covered) { out.pos = vec4f(0.0, 0.0, -1.0, 1.0); }
   out.uv = uv;
+  out.layer = layer;
   return out;
 }
 
@@ -602,7 +618,7 @@ fn toSrgb(c: vec3f) -> vec3f {
 }
 
 @fragment
-fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) vec4f {
+fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @interpolate(flat) layer: u32) -> @location(0) vec4f {
   // Implicit-level sampling: the mip level follows how small the picture is drawn on screen.
   let albedo = textureSample(albedoTex, samp, uv).rgb;   // de-lit, linear (srgb texture)
   let photo = textureSample(photoTex, samp, uv).rgb;
@@ -655,7 +671,10 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f) -> @location(0) ve
     // The gradient, with the photo's clouds kept as texture (its brightness against its own blurred self).
     let lum = dot(photo, vec3f(0.2126, 0.7152, 0.0722));
     let soft = dot(textureSampleLevel(photoTex, samp, uv, 5.0).rgb, vec3f(0.2126, 0.7152, 0.0722));
-    var g = skyGradient(uv) * mix(1.0, clamp(lum / max(soft, 1e-4), 0.3, 2.5), u.skyA.z) * u.skyA.y;
+    // Cloud texture: the photo against its blurred self. Not on the background layer, whose "photo" there is
+    // painted fill, not sky (it gave a bright fringe along rims).
+    let clouds = select(u.skyA.z, 0.0, layer == 1u);
+    var g = skyGradient(uv) * mix(1.0, clamp(lum / max(soft, 1e-4), 0.3, 2.5), clouds) * u.skyA.y;
     // Warm glow around the sun, wider and stronger when it's low.
     if (u.sun > 0.5) {
       let c = dot(normalize(viewPos(uv, 1.0)), normalize(u.lightPos));

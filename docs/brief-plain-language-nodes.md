@@ -191,3 +191,7 @@ From archetype 1, the canyon (October 2026):
   it by eye. Manual 3D steps dilute the value.
 - **Show, don't describe.** Iterating by eye with frames and short clips, and sketches drawn on screenshots,
   is how decisions get made. The tool should make both easy.
+- **Automatic first, markups second.** The image-to-scene pass gets most of the way; the rest is fixed with
+  quick markups on the picture inside the app, not a 3D package: brush an area and say what it is or what
+  to do ("repaint behind this: red sandstone", "this is sky", "push this back", "this is one object"). Each
+  markup is a node (mask, action, prompt), saved with the scene, editable and undoable.

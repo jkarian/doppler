@@ -52,15 +52,23 @@ def find_band(z: np.ndarray, sky: np.ndarray, tan_half_fov: float, aspect: float
     need = f_px * baseline * margin * (1 / z - 1 / np.exp(Lfar))
     band = (dist < np.maximum(need, 3)) & (L < Lfar - np.log(1.1)) & ~sky
     band = ndi.binary_closing(band, iterations=3) & ~sky
-    # Background depth: the far side carried in, smoothed so the hidden surface is plausible, not blocky.
-    Lbg = cv2.GaussianBlur(Lfar.astype(np.float32), (0, 0), max(2.0, reach / 6))
-    bg = np.where(band, np.exp(Lbg), z)
     # Everything nearer than the background around it (the near rock itself) is unknown for the fill, so
     # the band fills from the far side only: what gets uncovered is the far canyon, not the near wall.
     # "Near" is judged locally (about 60 px): in front of what's right beside it. Judged over the whole
     # reach, the canyon walls would count as near next to the sky, and the fill would pull in sky colours.
     Lfar_local = ndi.maximum_filter(L, size=2 * min(reach, 60) + 1)
     near = (L < Lfar_local - np.log(1.25)) & ~sky
+    # Background depth: from the nearest far pixel, the same one the fill takes its colour from, so behind a
+    # rim against mountains is mountain, and only rims against open sky have sky behind them. (The farthest
+    # depth within reach put sky behind rims that stand against mountains: a pink line along every rim.)
+    _, (iy, ix) = ndi.distance_transform_edt(near | band, return_indices=True)
+    Lsrc = L[iy, ix]
+    src_sky = sky[iy, ix]
+    # Smooth the land part (log depth), keeping sky as sky.
+    land_w = cv2.GaussianBlur((~src_sky).astype(np.float32), (0, 0), 4)
+    Lsmooth = cv2.GaussianBlur(np.where(src_sky, 0, Lsrc).astype(np.float32), (0, 0), 4) / np.maximum(land_w, 1e-3)
+    Lbg = np.where(src_sky, L.max(), np.maximum(Lsmooth, L + np.log(1.1)))
+    bg = np.where(band, np.exp(Lbg), z)
     return band, bg, reach, near | band
 
 
@@ -114,6 +122,7 @@ def main() -> None:
     ap.add_argument("--fill", choices=["opencv", "sdxl"], default="opencv")
     ap.add_argument("--sway", type=float, default=0.05, help="the display's sway amount (largest parallax shift, fraction of half-width)")
     ap.add_argument("--margin", type=float, default=1.5, help="band width safety factor (covers push-ins and the drop's camera moves)")
+    ap.add_argument("--depth-only", action="store_true", help="recompute the band's depth and normals, keep the existing fill")
     ap.add_argument("--prompt", default="red sandstone canyon cliff wall, layered rock strata, warm light, sharp natural texture, photo")
     args = ap.parse_args()
 
@@ -141,6 +150,8 @@ def main() -> None:
 
     images = {}
     for key, name in (("photo", info["image"]), ("albedo", info.get("albedo", info["image"]))):
+        if args.depth_only:
+            break
         print(f"filling the {key} ({args.fill}) ...")
         img = load(name)
         if args.fill == "sdxl":
@@ -155,13 +166,16 @@ def main() -> None:
     bg_full.astype("<f4").tofile(args.scene / "bg_depth.bin")
     Image.fromarray(band_full.astype(np.uint8) * 255).save(args.scene / "bg_mask.png")
     for key, name in (("photo", info["image"]), ("albedo", info.get("albedo", info["image"]))):
+        if args.depth_only:
+            break
         orig = np.asarray(Image.open(args.scene / name).convert("RGB"))
         up = np.asarray(Image.fromarray(images[key]).resize((W, H), Image.LANCZOS))
         Image.fromarray(np.where(band_full[..., None], up, orig)).save(args.scene / f"bg_{key}.png")
     n = compute_normals(bg_full.astype(np.float64), tan_half_fov, 1.0)
     save_normals(n, bg_full >= far * 0.98, args.scene / "bg_normal.png")
 
-    info["background"] = {"depth": "bg_depth.bin", "image": "bg_photo.png", "albedo": "bg_albedo.png", "normal": "bg_normal.png", "mask": "bg_mask.png", "fill": args.fill}
+    fill_used = info.get("background", {}).get("fill", args.fill) if args.depth_only else args.fill
+    info["background"] = {"depth": "bg_depth.bin", "image": "bg_photo.png", "albedo": "bg_albedo.png", "normal": "bg_normal.png", "mask": "bg_mask.png", "fill": fill_used}
     (args.scene / "scene.json").write_text(json.dumps(info, indent=2))
     print(f"Wrote the background layer into {args.scene}")
 

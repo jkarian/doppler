@@ -273,6 +273,7 @@ async function main() {
       { binding: 8, resource: { buffer: laserBuf } },
       { binding: 9, resource: { buffer: nookBuf } },
       { binding: 10, resource: shadowA2.createView() },
+      { binding: 11, resource: (bgTex?.depth ?? depthTex).createView() },
     ],
   });
   // The background layer draws with the same pipeline, its own depth, colour and normals.
@@ -291,6 +292,7 @@ async function main() {
           { binding: 8, resource: { buffer: laserBuf } },
           { binding: 9, resource: { buffer: nookBuf } },
           { binding: 10, resource: shadowA2.createView() },
+          { binding: 11, resource: depthTex.createView() },
         ],
       })
     : null;
