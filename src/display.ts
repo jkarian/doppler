@@ -502,13 +502,38 @@ async function main() {
   // Nook light placement (N): click adds a light at that spot in the picture, shift- or right-click removes
   // the nearest. Edits the graph's NookLights node (and reaches the editor); all lights show while placing.
   let nookPlacing = false;
-  const placeNook = (e: PointerEvent) => {
-    const node = runtime.graph.nodes.find((n) => n.type === "NookLights");
-    if (!node) return;
-    const pts = String(node.params?.positions ?? "")
+  const nookNode = () => runtime.graph.nodes.find((n) => n.type === "NookLights");
+  const nookPoints = () =>
+    String(nookNode()?.params?.positions ?? "")
       .split(";")
       .map((q) => q.split(",").map(Number))
       .filter((q) => q.length === 2 && q.every(Number.isFinite));
+  const setNookPoints = (pts: number[][]) => {
+    const node = nookNode();
+    if (!node) return;
+    node.params = { ...node.params, positions: pts.map((q) => q.map((x) => x.toFixed(4)).join(",")).join("; ") };
+    runtime.load(runtime.graph);
+    channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
+    monitor?.graphChanged();
+  };
+  // Numbered markers on each light while placing (a light behind rock may show no pool to click near).
+  const nookMarkers = document.createElement("div");
+  nookMarkers.style.cssText = "position:fixed;inset:0;pointer-events:none;font:600 12px system-ui,sans-serif";
+  document.body.append(nookMarkers);
+  const drawNookMarkers = () => {
+    if (!nookPlacing) return void (nookMarkers.innerHTML = "");
+    const c = camPos(time);
+    nookMarkers.innerHTML = nookPoints()
+      .map(([u, v], i) => {
+        const x = ((u * 2 - 1 - cam.center[0] + c[0] / (pivotZ * tanHalfFov * aspect)) * viewScale[0] + 1) / 2 * innerWidth;
+        const y = (1 - (1 - v * 2 - cam.center[1] + c[1] / (pivotZ * tanHalfFov)) * viewScale[1]) / 2 * innerHeight;
+        return `<div style="position:absolute;left:${x - 10}px;top:${y - 10}px;width:18px;height:18px;border:2px solid #ffd27a;border-radius:50%;color:#ffd27a;text-align:center;line-height:18px;text-shadow:0 0 3px #000">${i + 1}</div>`;
+      })
+      .join("");
+  };
+  const placeNook = (e: PointerEvent) => {
+    if (!nookNode()) return;
+    const pts = nookPoints();
     const [u, v] = toImageUv(e);
     if (e.shiftKey || e.button === 2) {
       let best = -1;
@@ -519,10 +544,7 @@ async function main() {
       });
       if (best >= 0 && bd < 0.06) pts.splice(best, 1);
     } else pts.push([u, v]);
-    node.params = { ...node.params, positions: pts.map((q) => q.map((x) => x.toFixed(4)).join(",")).join("; ") };
-    runtime.load(runtime.graph);
-    channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
-    monitor?.graphChanged();
+    setNookPoints(pts);
   };
 
   let dragging: "target" | "source" | null = null;
@@ -605,6 +627,7 @@ async function main() {
     else if (key === "b") benchmark();
     else if (key === "g") monitor?.toggle();
     else if (key === "n") nookPlacing = !nookPlacing;
+    else if (nookPlacing && (e.key === "Delete" || e.key === "Backspace")) setNookPoints([]);
     else if (key === "t") look.sun = !look.sun;
     else if (key === "1") look.flare = clamp(look.flare / 1.25, 0, 5);
     else if (key === "2") look.flare = clamp(look.flare * 1.25 || 0.05, 0, 5);
@@ -930,6 +953,7 @@ async function main() {
     draw();
     sendValues(now);
     monitor?.update(time);
+    drawNookMarkers();
     if (!hud.hidden && !recording) {
       const look = animatedLook(time); // what's actually on screen, after the graph
       hud.textContent =
@@ -952,7 +976,7 @@ async function main() {
       `${trackName}  ${audio.paused ? "paused" : "playing"}  ${time.toFixed(2)} s  bar ${music.bar(time).toFixed(2)}  ` +
 `${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
       `space play · J L seek · { } offset · A auto light · G music monitor · N place nook lights\n` +
-      (nookPlacing ? `PLACING NOOK LIGHTS: click to add · shift/right-click to remove · N when done · Save in the monitor (G)\n` : "")
+      (nookPlacing ? `PLACING NOOK LIGHTS: click to add · shift/right-click to remove · Delete clears all · N when done · Save in the monitor (G)\n` : "")
     );
   };
   requestAnimationFrame(frame);
