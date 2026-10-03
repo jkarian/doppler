@@ -90,8 +90,8 @@ export interface ScanOut {
 
 /** Nook lights: small lights tucked into the rock, each at a point in the picture, at its own level. */
 export interface NookOut {
-  lights: { u: number; v: number; level: number }[];
-  size: number; // each pool's diameter as a fraction of the picture's width, at the light's distance
+  lights: { u: number; v: number; level: number; r: number; b: number }[]; // r, b: this light's area and brightness multipliers
+  radius: number; // feet: how far each pool of light reaches (real size, so far pools look smaller)
   standoff: number; // how far in front of the rock (toward the camera), as a fraction of the pool's radius
   color: number[];
   intensity: number;
@@ -701,7 +701,8 @@ const defs: NodeDef[] = [
     doc:
       "Small lights tucked into nooks in the rock, each washing a pool of light over the walls around it (cut off where rock " +
       "juts out in between). Each hit of the named sounds switches one on: it rises over attack seconds and eases out over " +
-      "decay. positions: u,v picture points separated by ; (place them on the display with N). sounds: names separated by |. " +
+      "decay. positions: u,v[,area,brightness] picture points separated by ; (place them on the display with N: drag, scroll for " +
+      "area, shift+scroll for brightness). sounds: names separated by |. " +
       "pattern 0: hits walk through the lights in order; 1: the first sound fires the left half, the second the right half; " +
       "2: seeded random. Up to 3 show at once.",
     inputs: [
@@ -711,7 +712,7 @@ const defs: NodeDef[] = [
       { name: "seed", default: 1, kind: "const", step: 1 },
       { name: "attack", default: 0.04, kind: "const", min: 0, max: 2, step: 0.01, doc: "seconds to come on" },
       { name: "decay", default: 2, kind: "const", min: 0.05, max: 10, step: 0.05, doc: "seconds to go out" },
-      { name: "size", default: 0.06, min: 0.005, max: 0.5, step: 0.005, doc: "pool diameter, fraction of the picture's width (the canyon is miles deep: real-size lamps would be specks)" },
+      { name: "radius", default: 800, min: 20, max: 10000, step: 10, doc: "feet: how far each pool reaches (each light can scale it: scroll over its ring with N)" },
       { name: "standoff", default: 0.3, min: 0, max: 2, step: 0.01, doc: "distance in front of the rock, as a fraction of the pool's radius" },
       { name: "color", default: [1, 0.55, 0.22] },
       { name: "intensity", default: 3, min: 0, step: 0.05 },
@@ -722,7 +723,8 @@ const defs: NodeDef[] = [
       const pts = String(c.positions)
         .split(";")
         .map((p) => p.split(",").map(Number))
-        .filter((p) => p.length === 2 && p.every(Number.isFinite)) as [number, number][];
+        .filter((p) => p.length >= 2 && p.length <= 4 && p.every(Number.isFinite))
+        .map(([u, v, r = 1, b = 1]) => [u, v, r, b]) as [number, number, number, number][];
       const n = pts.length;
       const order = pts.map((p, k) => k).sort((a, b) => pts[a][0] - pts[b][0]); // left to right
       const groups = String(c.sounds).split("|").map((s) => s.trim()).filter(Boolean);
@@ -754,7 +756,7 @@ const defs: NodeDef[] = [
       return { pts, hits, attack: num(c.attack), decay: num(c.decay) };
     },
     eval: (i, ctx, state) => {
-      const s = state as { pts: [number, number][]; hits: [number, number, number][]; attack: number; decay: number };
+      const s = state as { pts: [number, number, number, number][]; hits: [number, number, number][]; attack: number; decay: number };
       const level = clamp(num(i.level), 0, 1);
       const lv = s.pts.map(() => 0);
       if (level > 0) {
@@ -769,8 +771,8 @@ const defs: NodeDef[] = [
         }
       }
       ctx.out.nooks = {
-        lights: s.pts.map(([u, v], k) => ({ u, v, level: lv[k] * level })),
-        size: Math.max(0.001, num(i.size)), standoff: Math.max(0, num(i.standoff)), color: vec(i.color), intensity: Math.max(0, num(i.intensity)),
+        lights: s.pts.map(([u, v, r, b], k) => ({ u, v, r, b, level: lv[k] * level })),
+        radius: Math.max(1, num(i.radius)), standoff: Math.max(0, num(i.standoff)), color: vec(i.color), intensity: Math.max(0, num(i.intensity)),
       };
       return {};
     },

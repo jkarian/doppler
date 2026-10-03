@@ -507,12 +507,15 @@ async function main() {
     String(nookNode()?.params?.positions ?? "")
       .split(";")
       .map((q) => q.split(",").map(Number))
-      .filter((q) => q.length === 2 && q.every(Number.isFinite));
+      .filter((q) => q.length >= 2 && q.length <= 4 && q.every(Number.isFinite))
+      .map(([u, v, r = 1, b = 1]) => [u, v, r, b]);
   // final = false while dragging: update the picture only; tell the editor and monitor on release.
   const setNookPoints = (pts: number[][], final = true) => {
     const node = nookNode();
     if (!node) return;
-    node.params = { ...node.params, positions: pts.map((q) => q.map((x) => x.toFixed(4)).join(",")).join("; ") };
+    // u,v and, when not 1, this light's area and brightness multipliers.
+    const fmtPt = ([u, v, r, b]: number[]) => [u.toFixed(4), v.toFixed(4), ...(r !== 1 || b !== 1 ? [r.toFixed(2), b.toFixed(2)] : [])].join(",");
+    node.params = { ...node.params, positions: pts.map(fmtPt).join("; ") };
     runtime.load(runtime.graph);
     if (!final) return;
     channel.postMessage({ type: "graph", graph: runtime.graph, name: graphName, from: "display", edit: true });
@@ -526,17 +529,32 @@ async function main() {
     ];
   };
   let nookDrag = -1; // index of the light being dragged
+  let nookHover = -1; // index of the light under the pointer (scroll adjusts it)
+  const nookAt = (x: number, y: number, within = 24) => {
+    const near = nookPoints().map(([u, v]) => uvToScreen(u, v)).map(([px, py]) => Math.hypot(px - x, py - y));
+    const i = near.indexOf(Math.min(...near));
+    return i >= 0 && near[i] < within ? i : -1;
+  };
+  let nookWheelTimer = 0;
   // Numbered markers on each light while placing (a light behind rock may show no pool to click near).
   const nookMarkers = document.createElement("div");
   nookMarkers.style.cssText = "position:fixed;inset:0;pointer-events:none;font:600 12px system-ui,sans-serif";
   document.body.append(nookMarkers);
   const drawNookMarkers = () => {
     if (!nookPlacing) return void (nookMarkers.innerHTML = "");
+    const feet = Number(nookNode()?.params?.radius ?? 800) || 800;
     nookMarkers.innerHTML = nookPoints()
-      .map(([u, v], i) => {
+      .map(([u, v, r, b], i) => {
         const [x, y] = uvToScreen(u, v);
-        const ring = i === nookDrag ? "#fff" : "#ffd27a";
-        return `<div style="position:absolute;left:${x - 10}px;top:${y - 10}px;width:18px;height:18px;border:2px solid ${ring};border-radius:50%;color:${ring};text-align:center;line-height:18px;text-shadow:0 0 3px #000">${i + 1}</div>`;
+        const ring = i === nookDrag || i === nookHover ? "#fff" : "#ffd27a";
+        // The area of effect as it appears on screen: the pool's real radius at the light's distance.
+        const px = ((feet / feetPerUnit) * r) / (depthAt(u, v) * tanHalfFov) * viewScale[1] * (innerHeight / 2);
+        const tag = r !== 1 || b !== 1 ? `<div style="position:absolute;left:${x + 12}px;top:${y - 7}px;color:${ring};font-size:11px;white-space:nowrap;text-shadow:0 0 3px #000">area ${Math.round(r * 100)}% · bright ${Math.round(b * 100)}%</div>` : "";
+        return (
+          `<div style="position:absolute;left:${x - px}px;top:${y - px}px;width:${2 * px}px;height:${2 * px}px;border:1px dashed ${ring};border-radius:50%;opacity:0.45"></div>` +
+          `<div style="position:absolute;left:${x - 10}px;top:${y - 10}px;width:18px;height:18px;border:2px solid ${ring};border-radius:50%;color:${ring};text-align:center;line-height:18px;text-shadow:0 0 3px #000">${i + 1}</div>` +
+          tag
+        );
       })
       .join("");
   };
@@ -545,9 +563,8 @@ async function main() {
     if (!nookNode()) return;
     const pts = nookPoints();
     if (!e.shiftKey && e.button === 0) {
-      const near = pts.map(([u, v]) => uvToScreen(u, v)).map(([x, y]) => Math.hypot(x - e.clientX, y - e.clientY));
-      const i = near.indexOf(Math.min(...near));
-      if (i >= 0 && near[i] < 18) {
+      const i = nookAt(e.clientX, e.clientY, 18);
+      if (i >= 0) {
         nookDrag = i;
         canvas.setPointerCapture(e.pointerId);
         return;
@@ -562,7 +579,7 @@ async function main() {
         if (d < bd) (bd = d), (best = i);
       });
       if (best >= 0 && bd < 0.06) pts.splice(best, 1);
-    } else pts.push([u, v]);
+    } else pts.push([u, v, 1, 1]);
     setNookPoints(pts);
   };
 
@@ -581,9 +598,10 @@ async function main() {
     if (nookDrag >= 0) (nookDrag = -1), setNookPoints(nookPoints());
   });
   canvas.addEventListener("pointermove", (e) => {
+    if (nookPlacing) nookHover = nookAt(e.clientX, e.clientY);
     if (nookDrag >= 0) {
       const pts = nookPoints();
-      pts[nookDrag] = toImageUv(e);
+      pts[nookDrag] = [...toImageUv(e), pts[nookDrag][2], pts[nookDrag][3]];
       return setNookPoints(pts, false);
     }
     if (dragging === "target") aimAt(e);
@@ -620,7 +638,20 @@ async function main() {
     "wheel",
     (e) => {
       e.preventDefault();
-      const k = Math.exp(-e.deltaY * 0.001);
+      // Shift+wheel arrives as sideways scrolling in some browsers (Chrome on Windows).
+      const k = Math.exp(-(e.deltaY || e.deltaX) * 0.001);
+      // Placing nook lights: scroll over a ring for its area, shift+scroll for its brightness.
+      if (nookPlacing) {
+        const i = nookAt(e.clientX, e.clientY, 40);
+        if (i < 0) return;
+        const pts = nookPoints();
+        const j = e.shiftKey ? 3 : 2;
+        pts[i][j] = clamp(pts[i][j] * k, 0.1, 10);
+        setNookPoints(pts, false);
+        clearTimeout(nookWheelTimer);
+        nookWheelTimer = window.setTimeout(() => setNookPoints(nookPoints()), 300);
+        return;
+      }
       if (e.shiftKey) look.intensity = clamp(look.intensity * k, 0.05, 50);
       else look.coneDeg = clamp(look.coneDeg * k, 0.5, 60);
     },
@@ -903,7 +934,8 @@ async function main() {
   };
 
   // Nook lights: each sits a little in front of the rock at its picture position (toward the camera, so
-  // it's in the nook's open air). Pool size is relative to the picture, not feet: the canyon is miles deep. Up to 8 render, brightest first; the first 3 get shadows.
+  // it's in the nook's open air). Pools have a real size (feet), so far ones look smaller. Up to 8 render,
+  // brightest first; the first 3 get shadows.
   // Placement mode (N) shows them all.
   const writeNooks = (N: RenderOut["nooks"]) => {
     nookData.fill(0);
@@ -911,9 +943,9 @@ async function main() {
     const lit = all.filter((l) => l.level > 0.002).sort((a, b) => b.level - a.level).slice(0, 8);
     lit.forEach((l, i) => {
       const z = depthAt(l.u, l.v);
-      const radius = N!.size * tanHalfFov * aspect * z;
+      const radius = (N!.radius / feetPerUnit) * l.r;
       const pos = viewPos(l.u, l.v, Math.max(z * 0.05, z - N!.standoff * radius));
-      const k = N!.intensity * l.level;
+      const k = N!.intensity * l.level * l.b;
       nookData.set([...pos, radius, ...(N!.color.map((c) => c * k) as Vec3), 0], 4 + i * 8);
     });
     nookCount[0] = lit.length;
@@ -1003,7 +1035,7 @@ async function main() {
       `${trackName}  ${audio.paused ? "paused" : "playing"}  ${time.toFixed(2)} s  bar ${music.bar(time).toFixed(2)}  ` +
 `${sec.kind} ${(sec.progress * 100).toFixed(0)}%  phrase bar ${music.phrase(time).bar.toFixed(1)}  tension ${music.tension(time).toFixed(2)}  offset ${(avOffset * 1000).toFixed(0)} ms  auto light ${autoLight ? "on" : "off"}\n` +
       `space play · J L seek · { } offset · A auto light · G music monitor · N place nook lights\n` +
-      (nookPlacing ? `PLACING NOOK LIGHTS: drag a ring to move it · click to add · shift/right-click to remove · Delete clears all · N when done · Save in the monitor (G)\n` : "")
+      (nookPlacing ? `PLACING NOOK LIGHTS: drag a ring to move it · scroll over it: area, shift+scroll: brightness · click to add · shift/right-click to remove · Delete clears all · N when done · Save in the monitor (G)\n` : "")
     );
   };
   requestAnimationFrame(frame);
