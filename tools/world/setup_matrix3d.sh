@@ -34,4 +34,9 @@ if python -c "import nvdiffrast.torch, simple_knn, diff_gaussian_rasterization, 
   mv /tmp/install_matrix3d_rest.sh /tmp/install_matrix3d.sh
 fi
 bash -e /tmp/install_matrix3d.sh
+# The upstream script installs the newest utils3d, but Matrix-3D's bundled MoGe v1 needs the old API (image_uv...):
+# use the copy it ships.
+pip uninstall -q -y utils3d
+pip install -q --no-build-isolation ./code/pano_init/utils3d
+python -c "import utils3d.torch as u; assert hasattr(u, 'image_uv'), 'utils3d too new'"
 python -c "import torch, diffsynth, nvdiffrast.torch, simple_knn; print('matrix-3d env ok', torch.__version__, torch.cuda.is_available())"
