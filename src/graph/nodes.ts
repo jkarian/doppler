@@ -122,7 +122,7 @@ export interface RenderOut {
   scan?: ScanOut;
   lasers?: LaserOut[];
   skyLasers?: SkyLaserOut[];
-  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number; floor: number; floorBelow: number; bounce: number; shadowSoftness: number; shadowDepth: number; caveDepth: number };
+  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number; floor: number; floorBelow: number; bounce: number; shadowSoftness: number; shadowDepth: number; caveDepth: number; detailBump: number };
   camera?: { swayX: number; swayY: number; pushZ: number };
   tone?: { baseDim: number; baked: number; cap: number };
 }
@@ -672,6 +672,7 @@ const defs: NodeDef[] = [
       { name: "caveDepth", default: 15, min: 0.5, max: 50, step: 0.5, doc: "how deep the rock behind the cave walls around us counts as solid when casting sun shadows, as a multiple of its distance" },
       { name: "shadowDepth", default: 0.6, min: 0.05, max: 2, step: 0.05, doc: "how deep far ridges count as solid rock when casting shadows, as a fraction of their distance" },
       { name: "floorBelow", default: -4300, min: -20000, max: 5000, step: 50, doc: "real height in feet relative to the camera: flat ground lower than this counts as floor (plateau tops above it still get sun)" },
+      { name: "detailBump", default: 3, min: 0, max: 20, step: 0.1, doc: "fine relief of the rock (cracks, grain) from the photo's texture, picked out by low light; affects all lights" },
       { name: "maxArc", default: 180, min: 0, max: 180, step: 0.5, doc: "degrees: the sun never goes higher (low enough, it lights only the walls). It eases into this ceiling over the last 6 degrees instead of stopping dead." },
       { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
@@ -680,7 +681,7 @@ const defs: NodeDef[] = [
       const k = clamp(num(i.level), 0, 1);
       ctx.out.sun = {
         on: num(i.enabled) > 0.5 && k > 0.001, arc: softCeiling(num(i.arc), num(i.maxArc), 6), azimuth: num(i.azimuth),
-        intensity: Math.max(0, num(i.intensity)) * Math.max(0, num(i.gain)) * k, floor: clamp(num(i.floorLight), 0, 1), floorBelow: num(i.floorBelow), bounce: Math.max(0, num(i.bounce)), shadowSoftness: clamp(num(i.shadowSoftness), 0, 1), shadowDepth: Math.max(0.01, num(i.shadowDepth)), caveDepth: Math.max(0.1, num(i.caveDepth)),
+        intensity: Math.max(0, num(i.intensity)) * Math.max(0, num(i.gain)) * k, floor: clamp(num(i.floorLight), 0, 1), floorBelow: num(i.floorBelow), bounce: Math.max(0, num(i.bounce)), shadowSoftness: clamp(num(i.shadowSoftness), 0, 1), shadowDepth: Math.max(0.01, num(i.shadowDepth)), caveDepth: Math.max(0.1, num(i.caveDepth)), detailBump: Math.max(0, num(i.detailBump)),
         color: vec(i.color), rays: Math.max(0, num(i.rays)) * k, flare: Math.max(0, num(i.flare)) * k, skyBoost: num(i.skyBoost) * k,
       };
       return {};
@@ -864,6 +865,7 @@ const defs: NodeDef[] = [
       { name: "sounds", default: "tick|tock", kind: "const" },
       { name: "pattern", default: 1, kind: "const", min: 0, max: 3, step: 1 },
       { name: "sectionPatterns", default: "", kind: "const", doc: "pattern per song section, separated by |; the last one carries on (\"1|3\": tick-tock in the first section, the sweep after). Empty: pattern everywhere" },
+      { name: "patternTimes", default: "", kind: "const", doc: "pattern by time, overriding sectionPatterns: \"0:1, 39:3\" = pattern 1 from the start, 3 from 0:39 (each time snaps to the nearest phrase line)" },
       { name: "sweepStep", default: 0.25, kind: "const", min: 0.0625, max: 2, step: 0.0625, doc: "pattern 3: beats between one light and the next (0.25 = sixteenth notes)" },
       { name: "sweepDecay", default: 0.5, kind: "const", min: 0.05, max: 5, step: 0.05, doc: "pattern 3: seconds each light takes to go out as the wave passes" },
       { name: "seed", default: 1, kind: "const", step: 1 },
@@ -899,7 +901,22 @@ const defs: NodeDef[] = [
       // The pattern can change with the song: sectionPatterns "1|3" = the first section uses 1, the rest 3.
       const sections = ctx.music?.a.sections ?? [];
       const perSection = String(c.sectionPatterns ?? "").split("|").map((s) => s.trim()).filter(Boolean).map(Number);
+      // Or by time: "0:1, 39:3" = pattern 1 from the start, 3 from 0:39. Each time snaps to the nearest phrase line
+      // (where the music turns), so a rough time lands on the beat.
+      const starts = ctx.music?.a.phrases?.starts ?? [];
+      const snap = (t: number) => starts.reduce((b, s) => (Math.abs(s - t) < Math.abs(b - t) ? s : b), t);
+      const byTime = String(c.patternTimes ?? "")
+        .split(",")
+        .map((s) => s.split(":").map(Number))
+        .filter((p) => p.length === 2 && p.every(Number.isFinite))
+        .map(([t, p]) => [t > 0 ? snap(t) : 0, p])
+        .sort((a, b) => a[0] - b[0]);
       const patternAt = (t: number) => {
+        if (byTime.length) {
+          let p = byTime[0][1];
+          for (const [s, q] of byTime) if (t >= s - 1e-3) p = q;
+          return Math.round(p);
+        }
         if (!perSection.length) return Math.round(num(c.pattern));
         let idx = sections.findIndex((s) => t >= s.start && t < s.end);
         if (idx < 0) idx = sections.length && t >= sections[sections.length - 1].end ? sections.length - 1 : 0;

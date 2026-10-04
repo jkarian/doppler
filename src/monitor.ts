@@ -360,6 +360,7 @@ export function createMonitor(o: MonitorOptions) {
 
   const drawFrame = (t: number) => {
     if (!bg || canvas.clientWidth * (devicePixelRatio || 1) !== canvas.width) drawBackground();
+    if (!bg || !bg.width || !bg.height || !canvas.width || !canvas.height) return; // panel not laid out yet (hidden or zero size)
     const dpr = devicePixelRatio || 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);

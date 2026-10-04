@@ -1057,6 +1057,7 @@ async function main() {
       ...UP, bgBindGroup ? 1 : 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
+    uniforms[55] = graphOut.sun?.detailBump ?? 0; // scanLines.w: fine rock relief from the photo's texture
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
     writeLasers(graphOut.lasers ?? [], graphOut.skyLasers ?? []);
     writeNooks(graphOut.nooks);

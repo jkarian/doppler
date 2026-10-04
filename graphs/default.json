@@ -19,11 +19,11 @@
    ],
    "name": "Rest height by section",
    "params": {
-    "quiet": -6,
-    "buildStart": -2,
-    "buildEnd": 6,
-    "drop": 7,
-    "normal": 3,
+    "quiet": -9,
+    "buildStart": -8,
+    "buildEnd": -3,
+    "drop": -4,
+    "normal": -7,
     "ease": 2
    }
   },
@@ -37,12 +37,13 @@
    "name": "Sun spurts",
    "params": {
     "max": 180,
-    "heaviness": 9.9,
+    "heaviness": 0.3,
     "dropMax": 90,
     "dropMin": 0,
     "sizeMax": 28,
-    "minGap": 9.5,
-    "sizeMin": 14
+    "minGap": 8,
+    "sizeMin": 19,
+    "returnBase": 30
    }
   },
   {
@@ -221,15 +222,16 @@
    ],
    "name": "Sun",
    "params": {
-    "azimuth": 40,
+    "azimuth": 0,
     "enabled": 1,
-    "maxArc": 40,
+    "maxArc": 3,
     "floorLight": 0,
     "gain": 10,
-    "bounce": 0.25,
-    "shadowDepth": 0.3,
-    "shadowSoftness": 0.1,
-    "caveDepth": 15
+    "bounce": 0.35,
+    "shadowDepth": 0.5,
+    "shadowSoftness": 0.05,
+    "caveDepth": 0.5,
+    "floorBelow": -10600
    }
   },
   {
@@ -750,7 +752,8 @@
     "positions": "0.5310,0.6163,1.36,1.00; 0.5024,0.3423; 0.4706,0.2774,1.50,1.00; 0.4864,0.3976,2.02,1.00; 0.4644,0.4870,5.49,1.00; 0.5808,0.8345; 0.5343,0.3058,1.66,1.00; 0.3663,0.6314,1.66,1.00; 0.4370,0.6884,4.49,1.00; 0.7256,0.5744; 0.6032,0.3857,1.36,1.00; 0.4982,0.4460,4.97,1.00; 0.5771,0.2553,2.02,1.00",
     "sounds": "tick|tock",
     "pattern": 1,
-    "sectionPatterns": "1|3"
+    "sectionPatterns": "1|3",
+    "patternTimes": "0:1, 39:3"
    },
    "pos": [
     1260,
@@ -774,7 +777,7 @@
    "type": "Sky",
    "name": "Sky",
    "params": {
-    "brightness": 5.9
+    "brightness": 6.3
    },
    "pos": [
     620,

@@ -37,7 +37,7 @@ struct Uniforms {
   sunFloor: f32,       // how much sun flat, upward-facing ground gets (1 = all; 0 = the sun lights only walls)
   scan: vec4f,         // MRI scan: axis (0 depth, 1 height, 2 sideways), front position, spacing, thickness (in axis units)
   scanColor: vec4f,    // rgb, intensity
-  scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), -
+  scanLines: vec4f,    // number of slices, spacing (scene units), reach (0..1 into the vista), detail bump strength
   skyA: vec4f,         // sky gradient: mix with the photo, brightness, clouds, glow around the sun
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
   sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth, cave rock solid depth (fractions of distance)
@@ -655,10 +655,22 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   let albedo = textureSample(albedoTex, samp, uv).rgb;   // de-lit, linear (srgb texture)
   let photo = textureSample(photoTex, samp, uv).rgb;
   // normal.png uses standard colours (z toward the camera); scene space has z into the scene.
-  let n = normalize((textureSample(normalTex, samp, uv).rgb * 2.0 - 1.0) * vec3f(1.0, 1.0, -1.0));
+  var n = normalize((textureSample(normalTex, samp, uv).rgb * 2.0 - 1.0) * vec3f(1.0, 1.0, -1.0));
   let z = depthAt(uv);
   let p = viewPos(uv, z);
   let sky = z >= u.far * u.skyCut;
+  // Detail bump: the depth-based normals hold ledges and strata, not the grain of the rock. Treat the de-lit
+  // rock's fine brightness as height (cracks darker, so lower) and tilt the normal down its slope, so a raking
+  // light picks out the texture. Fine scale only: the slope is measured two texels either side.
+  let bump = u.scanLines.w;
+  if (bump > 0.0 && !sky) {
+    let px = 2.0 / u.imgSize;
+    let lw = vec3f(0.2126, 0.7152, 0.0722);
+    let hx = dot(textureSampleLevel(albedoTex, samp, uv + vec2f(px.x, 0.0), 0.0).rgb - textureSampleLevel(albedoTex, samp, uv - vec2f(px.x, 0.0), 0.0).rgb, lw);
+    let hy = dot(textureSampleLevel(albedoTex, samp, uv + vec2f(0.0, px.y), 0.0).rgb - textureSampleLevel(albedoTex, samp, uv - vec2f(0.0, px.y), 0.0).rgb, lw);
+    // Picture right is +x; picture down is -y in scene space.
+    n = normalize(n - bump * vec3f(hx, -hy, 0.0));
+  }
 
   let hit = lightAt(p);
   // Slight wrap so rough AI-derived normals don't go hard black at the terminator, except for the sun: a real sun

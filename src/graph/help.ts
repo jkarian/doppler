@@ -22,6 +22,7 @@ const HELP: Record<string, string> = {
 
   // Sun
   "Sun.gain": "Overall sun brightness: multiplies whatever drives it. Raise it to make the sun stand out from the other lights (the brightness cap can limit how far it shows).",
+  "Sun.detailBump": "Fine relief of the rock: cracks, grain and small layers, taken from the photo's texture, so a low sun picks them out. Affects every light. 0 = off.",
   "Sun.floorLight": "How much sun falls on the floor: flat ground lower than floorBelow (canyon floor, river) and the cave floor around us. 0 = none; 1 = lit like everything else. Plateau tops and high ledges always get sun.",
   "Sun.bounce": "Warm light bounced off sunlit rock and the bright sky into the faces turned away from the sun, which otherwise stay dark when we look toward the sun. Grows as the sun climbs. 0 = none.",
   "Sun.shadowSoftness": "Edge of the sun's cast shadows: 0 = hard and crisp like real sunlight, 1 = soft.",
@@ -77,6 +78,7 @@ const HELP: Record<string, string> = {
   "NookLights.nearDecay": "Seconds for the near lights to fade after a big moment.",
   "NookLights.decay": "Seconds for the mid and far lights to fade after each tick or tock.",
   "NookLights.attack": "Seconds for a light to come on.",
+  "NookLights.patternTimes": "Change the pattern at moments in the song: \"0:1, 39:3\" = tick-tock from the start, the near-to-far wave from 0:39. Times snap to the nearest phrase line. Overrides sectionPatterns.",
   "NookLights.pattern": "0: hits walk through the lights in order. 1: ticks fire the left half, tocks the right. 2: random. 3: on every downbeat a wave runs from the nearest light out to the farthest, one light per sweepStep beats (near lights included; they still flash on drops too).",
 
   // Lasers
