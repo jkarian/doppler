@@ -35,11 +35,13 @@ def main() -> None:
             f"--anchor_frame_indices 0 --output_dir {geo} --depth_estimation_interval 10 --width {a.width} --height {a.height}")
         run(f"{sys.executable} code/utils_3dscene/gs_optim_datagen.py --optimized_depth_dir {geo}/data/optimized_depths "
             f"--camera_path {cond}/cameras.npz --output_dir {geo}/data")
+    # Densify only until 1,501 like upstream: letting it run to half the training made the Gaussians fill the 24 GB card
+    # (6.5 s per step). Longer training then refines the same Gaussians.
     it = a.iterations
     saves = " ".join(str(x) for x in sorted({3000, it // 2, it}))
     run(f"cd code/Pano_GS_Opt && {sys.executable} train.py -s {geo}/data -m {geo}/output -r 1 --use_decoupled_appearance "
         f"--save_iterations {saves} --test_iterations {it} --sh_degree 0 --densify_from_iter 500 "
-        f"--densify_until_iter {max(1501, it // 2)} --iterations {it} --eval --img_sample_interval 1 --num_views_per_view 3 "
+        f"--densify_until_iter 1501 --iterations {it} --eval --img_sample_interval 1 --num_views_per_view 3 "
         f"--num_of_point_cloud 3000000 --device {a.device} --distortion_from_iter {it + 1} --depth_normal_from_iter {it + 1}")
     shutil.copy(f"{geo}/output/point_cloud/iteration_{it}/point_cloud.ply", f"{d}/generated_3dgs_opt.ply")
     print("wrote", f"{d}/generated_3dgs_opt.ply")
