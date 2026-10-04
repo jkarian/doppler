@@ -23,5 +23,6 @@ ms.meshing_decimation_quadric_edge_collapse_with_texture(targetfacenum=target, q
                                                           preservenormal=True, planarquadric=True)
 n1 = ms.current_mesh().face_number()
 out = src.with_name(f"{src.stem}_{round(target / 1000)}k.obj")
-ms.save_current_mesh(str(out), save_textures=True, save_wedge_texcoord=True)
+# Don't re-save the textures: MeshLab rewrites them at lower JPEG quality over the originals.
+ms.save_current_mesh(str(out), save_textures=False, save_wedge_texcoord=True)
 print(f"{n0} -> {n1} triangles; wrote {out}")
