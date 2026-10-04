@@ -132,6 +132,20 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      the display draws it behind the main layer (`?bg=off` to compare). Seams gone; fill quality next.
    - Camera pitch is uncertain (5-23 deg depending on the measure); kept at 23 so tuned angles hold.
    - Not done yet: switching the main scene to MoGe depth; "Regenerate from depth" (fallback, optional).
+   - **Dreamed views -> splat (2026-10-03, `tools/world/`, runs in WSL2 Ubuntu 24.04 on the 4090).** One photo
+     -> Stable Virtual Camera dreams a camera move (`dream_views.sh`, non-commercial licence) -> SeedVR2 2x
+     upscale as one clip (`upscale_views.sh`, Apache) -> MoGe with the dreamed lens (`moge_views.py`, own venv)
+     -> gsplat training (`splat_train.py`): cameras by PnP + bundle adjustment (the video model doesn't follow
+     its own camera path), MoGe depth corrected by distance to match the dreams, hidden-area seed points, depth
+     guidance, the real photo on half the steps -> `bake_splat.py` (visible surface + peeled "behind" layer at
+     4K) -> `make_splat_scene.py` builds `scenes/canyon-splat` (view `&scene=canyon-splat`). Fly-around:
+     `view_splat.py` (localhost:8080); `.ply` export: `export_ply.py`. Setup: `setup_wsl.sh`, `setup_moge.sh`.
+   - User verdict: spire much better, left near wall better, still some artifacts; less than hoped from that
+     much work. The splat is good only along the dreamed path (one spiral); further moves (left/right/up/
+     forward, `dream_and_upscale.sh`) were started and stopped, not yet run. Splat look is soft (boil averages
+     out). The user is now researching how 3D-world systems (Marble, HunyuanWorld/Voyager, Lyra...) do it:
+     their key trick seems to be memory (render the 3D so far, dream only the holes, add, repeat).
+   - Models live in C:\AI_Models (Hugging Face cache in C:\AI_Models\huggingface; Wan 2.2 already there).
 3. Patterns. Structure: Scene -> Arrangement (when: which pattern on which setup in which song part) ->
    Pattern x Setup (how x what; patterns reusable across setups) -> Objects -> Elements -> Nodes -> Code.
    Foundation: a shared Houdini-style point/attribute model (every element has position, colour, brightness,
