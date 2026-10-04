@@ -15,6 +15,7 @@ cd /opt/world/Matrix-3D
 # The panorama step loads a 7B captioning model up front even when a prompt is given: load it only if needed.
 sed -i 's/^\(\s*\)self.Lamma_Video = Lamma_Video(self.device)/\1self.Lamma_Video = None/' code/pano_init/i2p_model.py
 sed -i 's/prompt = self.Lamma_Video.extract_prompt(/prompt = Lamma_Video(self.device).extract_prompt(/' code/pano_init/i2p_model.py
+python "$REPO/tools/world/matrix3d_patches.py"
 
 mkdir -p "$OUT"
 IMAGE=$(python -c "import json; print(json.load(open('$SCENE/scene.json'))['image'])")
