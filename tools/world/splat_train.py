@@ -1,4 +1,4 @@
-"""Train a Gaussian splat of a scene from its photo plus dreamed camera moves, then bake depth from the photo's camera.
+﻿"""Train a Gaussian splat of a scene from its photo plus dreamed camera moves, then bake depth from the photo's camera.
 
     (inside WSL)  bash tools/world/run.sh tools/world/splat_train.py scenes/canyon spiral [--stride 3] [--steps 15000]
 
@@ -28,6 +28,7 @@ preview_photo_view.png, check_views.png (renders at training cameras next to the
 import argparse
 import json
 import math
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -62,9 +63,17 @@ def unproject(z, K, step=1):
     return rays * z[vv, uu][..., None], vv, uu
 
 
-def measure_cameras(move_dir, ks, frame0, z, land):
-    """World-to-camera (OpenCV) of dreamed frames ks, measured by PnP against frame 0 = the photo's view, plus the
-    inlier matches (world points, pixels in frame k). World = the photo's camera, in the units of z."""
+def measure_cameras(move_dir, ks, frame0, z, land, prior_weight=5.0):
+    """World-to-camera (OpenCV) of dreamed frames ks, plus their matches (world points, pixels in frame k).
+    World = the photo's camera (frame 0), in the units of z.
+
+    Points on the photo are matched into every frame (kept if they pass a depth-free geometric check, so near
+    rock isn't thrown out for disagreeing with an imperfect depth map). PnP against z gives a first guess; then
+    bundle adjustment solves all cameras and each point's depth along its photo ray together, with z only as a
+    gentle pull (prior_weight pixels per unit of log-depth error). The photo's camera is fixed."""
+    from scipy.optimize import least_squares
+    from scipy.sparse import lil_matrix
+
     sift = cv2.SIFT_create(nfeatures=12000, contrastThreshold=0.01)
     clahe = cv2.createCLAHE(3.0, (8, 8))
 
@@ -74,29 +83,79 @@ def measure_cameras(move_dir, ks, frame0, z, land):
 
     (h, w), k0, d0 = feats(0)
     K = intrinsics(frame0, w, h)
+    Kinv = np.linalg.inv(K)
     zs = cv2.resize(z, (w, h), interpolation=cv2.INTER_NEAREST)
     ls = cv2.resize(land.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST).astype(bool)
+    p0_all = np.float64([kp.pt for kp in k0])
+    use = ls[p0_all[:, 1].astype(int), p0_all[:, 0].astype(int)]
+    rays = np.c_[p0_all + 0.5, np.ones(len(p0_all))] @ Kinv.T
+    zprior = zs[p0_all[:, 1].astype(int), p0_all[:, 0].astype(int)]
+
     matcher = cv2.BFMatcher()
-    out = {}
+    obs = []  # (frame slot, point index, u, v)
+    poses = {}
     for k in ks:
         _, kk, dd = feats(k)
-        m = [a for a, b in matcher.knnMatch(d0, dd, k=2) if a.distance < 0.75 * b.distance]
-        p0 = np.float64([k0[a.queryIdx].pt for a in m])
-        p1 = np.float64([kk[a.trainIdx].pt for a in m])
-        iu, iv = p0[:, 0].astype(int), p0[:, 1].astype(int)
-        ok = ls[iv, iu]
-        p0, p1, iu, iv = p0[ok], p1[ok], iu[ok], iv[ok]
-        if len(p0) < 30:
+        m = [a for a, b in matcher.knnMatch(d0, dd, k=2) if a.distance < 0.75 * b.distance and use[a.queryIdx]]
+        if len(m) < 30:
             continue
-        X = (np.c_[p0 + 0.5, np.ones(len(p0))] @ np.linalg.inv(K).T) * zs[iv, iu][:, None]
-        good, rv, tv, inl = cv2.solvePnPRansac(X, p1, K, None, reprojectionError=4, iterationsCount=3000)
+        j = np.array([a.queryIdx for a in m])
+        p1 = np.float64([kk[a.trainIdx].pt for a in m])
+        _, fm = cv2.findFundamentalMat(p0_all[j], p1, cv2.FM_RANSAC, 1.5, 0.999)
+        if fm is None:
+            continue
+        fm = fm.ravel().astype(bool)
+        j, p1 = j[fm], p1[fm]
+        good, rv, tv, inl = cv2.solvePnPRansac(rays[j] * zprior[j, None], p1, K, None, reprojectionError=8, iterationsCount=3000)
         if not good or inl is None or len(inl) < 20:
             continue
+        poses[k] = np.r_[rv.ravel(), tv.ravel()]
+        obs += [(k, jj, u, v) for jj, (u, v) in zip(j, p1)]
+    ks = sorted(poses)
+    slot = {k: s for s, k in enumerate(ks)}
+    pts = sorted({o[1] for o in obs})
+    pidx = {p: i for i, p in enumerate(pts)}
+    O = np.array([(slot[k], pidx[j], u, v) for k, j, u, v in obs])
+    fs, ps, uv = O[:, 0].astype(int), O[:, 1].astype(int), O[:, 2:]
+    R0 = rays[pts]
+    lz0 = np.log(zprior[pts])
+    nf, npnt = len(ks), len(pts)
+
+    def residuals(x):
+        cam = x[: 6 * nf].reshape(nf, 6)
+        lz = x[6 * nf :]
+        Xw = R0 * np.exp(lz)[:, None]
+        Rm = np.stack([cv2.Rodrigues(c[:3])[0] for c in cam])
+        Xc = np.einsum("nij,nj->ni", Rm[fs], Xw[ps]) + cam[fs, 3:]
+        q = Xc @ K.T
+        r = (q[:, :2] / np.maximum(q[:, 2:3], 1e-6) - uv).ravel()
+        return np.r_[r, prior_weight * (lz - lz0)]
+
+    A = lil_matrix((2 * len(O) + npnt, 6 * nf + npnt), dtype=np.uint8)
+    rows = np.arange(len(O))
+    for c in range(6):
+        A[2 * rows, 6 * fs + c] = 1
+        A[2 * rows + 1, 6 * fs + c] = 1
+    A[2 * rows, 6 * nf + ps] = 1
+    A[2 * rows + 1, 6 * nf + ps] = 1
+    A[2 * len(O) + np.arange(npnt), 6 * nf + np.arange(npnt)] = 1
+    x0 = np.r_[np.concatenate([poses[k] for k in ks]), lz0]
+    e0 = np.abs(residuals(x0)[: 2 * len(O)]).reshape(-1, 2)
+    sol = least_squares(residuals, x0, jac_sparsity=A, loss="huber", f_scale=2.0, x_scale="jac", max_nfev=200)
+    e1 = np.linalg.norm(residuals(sol.x)[: 2 * len(O)].reshape(-1, 2), axis=1)
+    print(f"    bundle adjustment: {nf} cameras, {npnt} points, {len(O)} matches; "
+          f"median error {np.median(np.linalg.norm(e0, axis=1)):.2f} -> {np.median(e1):.2f} px; "
+          f"depths moved by a median {np.median(np.abs(sol.x[6 * nf:] - lz0)) * 100:.0f}%")
+    cam = sol.x[: 6 * nf].reshape(nf, 6)
+    Xw = R0 * np.exp(sol.x[6 * nf :])[:, None]
+    out = {}
+    for k in ks:
+        s = slot[k]
         V = np.eye(4)
-        V[:3, :3] = cv2.Rodrigues(rv)[0]
-        V[:3, 3] = tv.ravel()
-        inl = inl.ravel()
-        out[k] = (V.astype(np.float32), X[inl], p1[inl], (w, h))
+        V[:3, :3] = cv2.Rodrigues(cam[s, :3])[0]
+        V[:3, 3] = cam[s, 3:]
+        sel = (fs == s) & (e1 < 4)
+        out[k] = (V.astype(np.float32), Xw[ps[sel]], uv[sel], (w, h))
     return out
 
 
@@ -151,6 +210,7 @@ def main() -> None:
     imgs, Ks, w2cs, dgts = [photo], [], [np.eye(4, dtype=np.float32)], [torch.tensor(np.nan_to_num(zph, nan=0), dtype=torch.float32, device=dev)]
     seeds_xyz, seeds_rgb = [], []
     frame0 = None
+    remap = None
     for move in args.moves:
         d = world / move
         tf = json.loads((d / "transforms.json").read_text())["frames"]
@@ -160,10 +220,32 @@ def main() -> None:
         cams = measure_cameras(d, ks, tf[0], np.nan_to_num(zph, nan=sky_z), land)
         print(f"  {move}: measured {len(cams)} of {len(ks)} cameras")
         Kph = intrinsics(tf[0], pw, ph)
+        if remap is None:
+            # The dreams' geometry disagrees with MoGe by distance (far rock comes out much closer in the dreams).
+            # Fit that as a curve over log depth from the bundle-adjusted points and apply it to every MoGe depth,
+            # so the start shape and the depth guidance match what the frames show.
+            Xw = np.concatenate([c[1] for c in cams.values()])
+            q = Xw @ Kph.T
+            u = (q[:, 0] / q[:, 2]).astype(int).clip(0, pw - 1)
+            v = (q[:, 1] / q[:, 2]).astype(int).clip(0, ph - 1)
+            zm = zph[v, u]
+            ok = np.isfinite(zm) & (zm > 0) & (Xw[:, 2] > 0)
+            lm, lr = np.log(zm[ok]), np.log(Xw[ok, 2] / zm[ok])
+            edges = np.quantile(lm, np.linspace(0, 1, 11))
+            xs = np.array([np.median(lm[(lm >= a) & (lm <= b)]) for a, b in zip(edges[:-1], edges[1:])])
+            ys = np.array([np.median(lr[(lm >= a) & (lm <= b)]) for a, b in zip(edges[:-1], edges[1:])])
+            out_log = np.maximum.accumulate(xs + ys)  # keep the order of distances
+            def remap(z, xs=xs, shift=out_log - xs):
+                return z * np.exp(np.interp(np.log(np.maximum(z, 1e-6)), xs, shift))
+            print("    distance correction (MoGe -> dreams): " + ", ".join(f"{math.exp(a):.0f}->{math.exp(b):.0f}" for a, b in zip(xs[::3], out_log[::3])))
+            zph = remap(zph)
+            sky_z = float(np.nanmax(zph)) * 3
+            dgts[0] = torch.tensor(np.nan_to_num(zph, nan=0), dtype=torch.float32, device=dev)
         for k, (V, Xw, p1, (fw, fh)) in cams.items():
             im = load_rgb(src / f"{k:03d}.png")
             mk = np.load(d / "moge" / f"{k:03d}.npz")
             zk, mkm = mk["depth"].astype(np.float64), mk["mask"].astype(bool)
+            zk = np.where(mkm, remap(np.where(mkm, zk, 1.0)), 0)
             # MoGe's depth for this frame, scaled into world units by the matched points' depths in this camera.
             Xc = Xw @ V[:3, :3].T + V[:3, 3]
             zz = cv2.resize(zk, (fw, fh), interpolation=cv2.INTER_NEAREST)[p1[:, 1].astype(int).clip(0, fh - 1), p1[:, 0].astype(int).clip(0, fw - 1)]
@@ -286,18 +368,26 @@ def main() -> None:
             b = (r[0, ..., :3].clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
             rows.append(np.concatenate([a, b], 1))
         Image.fromarray(np.concatenate(rows, 0)).resize((2048, 1152 * len(rows) // 2)).save(out / "check_views.png")
-        # A slow sideways swing about a point at mid depth, to see the 3D.
+        # Replay the dreamed camera path (photo -> each measured camera in turn -> photo), smoothly interpolated:
+        # the honest test, since the splat only knows what the dreams covered.
+        from scipy.spatial.transform import Rotation, Slerp
+
+        path = [Vfinal[0].numpy()] + [Vfinal[i].numpy() for i in range(1, nv)] + [Vfinal[0].numpy()]
+        c2w = [np.linalg.inv(V) for V in path]
         tmp = out / "spin"
-        tmp.mkdir(exist_ok=True)
-        pivot = float(np.nanmedian(zph))
-        for k in range(72):
-            a = math.radians(10) * math.sin(2 * math.pi * k / 72)
-            R = np.array([[math.cos(a), 0, -math.sin(a)], [0, 1, 0], [math.sin(a), 0, math.cos(a)]], np.float32)
-            V = np.eye(4, dtype=np.float32)
-            V[:3, :3] = R
-            V[:3, 3] = (np.eye(3) - R) @ np.array([0, 0, pivot], np.float32)
-            r, _, _ = render(torch.tensor(V, device=dev), Kt[0], pw, ph, mode="RGB")
-            Image.fromarray((r[0].clamp(0, 1) * 255).byte().cpu().numpy()).save(tmp / f"{k:03d}.png")
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir()
+        n_out = 0
+        for a, b in zip(c2w[:-1], c2w[1:]):
+            sl = Slerp([0, 1], Rotation.from_matrix([a[:3, :3], b[:3, :3]]))
+            for t in np.linspace(0, 1, 4, endpoint=False):
+                M = np.eye(4)
+                M[:3, :3] = sl(t).as_matrix()
+                M[:3, 3] = (1 - t) * a[:3, 3] + t * b[:3, 3]
+                V = torch.tensor(np.linalg.inv(M), dtype=torch.float32, device=dev)
+                r, _, _ = render(V, Kt[0], pw, ph, mode="RGB")
+                Image.fromarray((r[0].clamp(0, 1) * 255).byte().cpu().numpy()).save(tmp / f"{n_out:03d}.png")
+                n_out += 1
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", "24", "-i", str(tmp / "%03d.png"), "-c:v", "libx264",
                     "-crf", "16", "-pix_fmt", "yuv420p", str(out / "spin.mp4")], check=True)
     print(f"wrote {out}")
