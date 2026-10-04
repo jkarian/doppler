@@ -30,6 +30,7 @@ interface SceneInfo {
   normal: string;
   near: number;
   far: number;
+  metersPerUnit?: number; // real scale, when known (e.g. scenes built from a distance markup)
   fovDeg: number;
   haze?: { airlight: number[]; beta: number };
   up?: number[]; // true vertical in scene space, from the flat ground (the photo's camera looks down a little)
@@ -469,7 +470,9 @@ async function main() {
   const graphRes = await fetch(`graphs/${graphName}.json`);
   if (!graphRes.ok) fail(`No graph graphs/${graphName}.json`);
   // Real-world distance of a picture point, for nodes that treat near and far differently.
-  const depthFeet = (u: number, v: number) => depthAt(u, v) * (15840 / pct(0.95));
+  // Real scale: scene.json metersPerUnit when the scene knows it (e.g. from a distance markup); otherwise assume the far land is about 3 miles (15,840 ft) out.
+  const sceneFeetPerUnit = info.metersPerUnit ? info.metersPerUnit * 3.28084 : 15840 / pct(0.95);
+  const depthFeet = (u: number, v: number) => depthAt(u, v) * sceneFeetPerUnit;
   let diskText = await graphRes.text();
   const runtime = new GraphRuntime(JSON.parse(diskText) as Graph, { music, scene: { gapHorizon, depthFeet } });
   // Unsaved edits made here (monitor, placement, keys) or in the editor. While there are none, a change
@@ -1131,7 +1134,7 @@ async function main() {
     return { lo, hi };
   })();
   // Real-world scale: the far land is about 3 miles (15,840 ft) out.
-  const feetPerUnit = 15840 / pct(0.95);
+  const feetPerUnit = sceneFeetPerUnit;
   const scanUniforms = (s: RenderOut["scan"]): number[] => {
     if (!s) return new Array(12).fill(0);
     const span = landRange.hi[s.axis] - landRange.lo[s.axis];
