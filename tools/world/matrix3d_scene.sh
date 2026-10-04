@@ -7,7 +7,10 @@ set -e
 REPO=/mnt/d/Projects/doppler-canyon
 SCENE=$REPO/$1
 PROMPT=$2
-OUT=$SCENE/world/matrix
+# Optional: an input image other than the scene's photo (e.g. just the view through a cave mouth, so the panorama
+# opens up instead of rebuilding the cave) and an output folder name under <scene>/world/.
+INPUT=${3:-}
+OUT=$SCENE/world/${4:-matrix}
 export PATH=/usr/local/cuda-12.8/bin:$PATH CUDA_HOME=/usr/local/cuda-12.8 HF_HOME=/mnt/c/AI_Models/huggingface
 export OPENCV_IO_ENABLE_OPENEXR=1  # the panorama depth step writes .exr
 . /opt/world/venv-matrix/bin/activate
@@ -19,8 +22,12 @@ sed -i 's/prompt = self.Lamma_Video.extract_prompt(/prompt = Lamma_Video(self.de
 python "$REPO/tools/world/matrix3d_patches.py"
 
 mkdir -p "$OUT"
-IMAGE=$(python -c "import json; print(json.load(open('$SCENE/scene.json'))['image'])")
-python -c "from PIL import Image; Image.open('$SCENE/$IMAGE').convert('RGB').resize((1920, 1080), Image.LANCZOS).save('$OUT/input.jpg', quality=95)"
+if [ -n "$INPUT" ]; then
+  python -c "from PIL import Image; Image.open('$REPO/$INPUT').convert('RGB').save('$OUT/input.jpg', quality=95)"
+else
+  IMAGE=$(python -c "import json; print(json.load(open('$SCENE/scene.json'))['image'])")
+  python -c "from PIL import Image; Image.open('$SCENE/$IMAGE').convert('RGB').resize((1920, 1080), Image.LANCZOS).save('$OUT/input.jpg', quality=95)"
+fi
 
 if [ ! -f "$OUT/pano_img.jpg" ]; then
   echo "== 1/3 photo -> panorama"
