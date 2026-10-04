@@ -460,7 +460,7 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   // background layer's own seam (where its band meets the object it sits behind) stays behind everything,
   // so it can't slide out as a ghost outline.
   if (silhouette && u.up.w > 0.5) {
-    out.pos.z = clamp(out.pos.z * select(1.25, 1.6, layer == 1u), 0.0, 1.0);
+    out.pos.z = clamp(out.pos.z * (1.25 + 0.35 * f32(layer)), 0.0, 1.0);  // 1.25 main, 1.6, 1.95... behind
   }
   out.uv = uv;
   out.layer = layer;
@@ -726,7 +726,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
     let soft = dot(textureSampleLevel(photoTex, samp, uv, 5.0).rgb, vec3f(0.2126, 0.7152, 0.0722));
     // Cloud texture: the photo against its blurred self. Not on the background layer, whose "photo" there is
     // painted fill, not sky (it gave a bright fringe along rims).
-    let clouds = select(u.skyA.z, 0.0, layer == 1u);
+    let clouds = select(u.skyA.z, 0.0, layer >= 1u);
     var g = skyGradient(uv) * mix(1.0, clamp(lum / max(soft, 1e-4), 0.3, 2.5), clouds) * u.skyA.y;
     // Warm glow around the sun, wider and stronger when it's low.
     if (u.sun > 0.5) {
