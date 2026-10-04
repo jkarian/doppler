@@ -27,6 +27,7 @@ interface SceneInfo {
   width: number;
   height: number;
   depth: string;
+  meshDepth?: string; // a cut-out main layer's mesh depth, carried past its outline (tools/vista_plate.py)
   normal: string;
   near: number;
   far: number;
@@ -87,13 +88,14 @@ async function main() {
 
   const info: SceneInfo = await (await fetch(sceneUrl + "scene.json")).json();
   const loadBitmap = (name: string) =>
-    fetch(sceneUrl + name).then((r) => r.blob()).then((b) => createImageBitmap(b, { colorSpaceConversion: "none" }));
+    fetch(sceneUrl + name).then((r) => r.blob()).then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }));
   const [photoBmp, albedoBmp, normalBmp, depthBuf] = await Promise.all([
     loadBitmap(info.image),
     loadBitmap((params.get("delight") !== "off" && info.albedo) || info.image),
     loadBitmap(info.normal),
     fetch(sceneUrl + info.depth).then((r) => r.arrayBuffer()),
   ]);
+  const meshDepthBuf = info.meshDepth ? await fetch(sceneUrl + info.meshDepth).then((r) => r.arrayBuffer()) : null;
   const depth = new Float32Array(depthBuf);
   // ?bg=off: no layers behind; ?bg=1: only the first.
   const bgInfos = params.get("bg") === "off" || !info.background ? [] : [info.background].flat().slice(0, params.get("bg") === "1" ? 1 : undefined);
@@ -192,6 +194,13 @@ async function main() {
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
   device.queue.writeTexture({ texture: depthTex }, depth, { bytesPerRow: W * 4 }, [W, H]);
+  const meshDepthTex = meshDepthBuf
+    ? (() => {
+        const d = device.createTexture({ size: [W, H], format: "r32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+        device.queue.writeTexture({ texture: d }, new Float32Array(meshDepthBuf), { bytesPerRow: W * 4 }, [W, H]);
+        return d;
+      })()
+    : depthTex;
   // Layers behind: textures (same sizes and formats as the main layer's).
   const bgTexs = bgFilesList.map((bgFiles) => {
     const d = device.createTexture({ size: [W, H], format: "r32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
@@ -278,6 +287,7 @@ async function main() {
       { binding: 8, resource: { buffer: laserBuf } },
       { binding: 9, resource: { buffer: nookBuf } },
       { binding: 10, resource: shadowA2.createView() },
+      { binding: 11, resource: meshDepthTex.createView() },
     ],
   });
   // The layers behind draw with the same pipeline, each with its own depth, colour and normals.
@@ -296,6 +306,7 @@ async function main() {
         { binding: 8, resource: { buffer: laserBuf } },
         { binding: 9, resource: { buffer: nookBuf } },
         { binding: 10, resource: shadowA2.createView() },
+        { binding: 11, resource: bgTex.depth.createView() },
       ],
     }),
   );

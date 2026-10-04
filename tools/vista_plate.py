@@ -43,6 +43,7 @@ MODEL = "Ruicheng/moge-2-vitl-normal"
 VISTA_MIN_M = 100.0  # pillars and spire reach to 80 m in the markup
 VISTA_KNEE_M = 300.0  # plate depths below this are squeezed so the nearest painted rock lands at VISTA_MIN_M
 KEPT_DIFF = 10.0  # mean abs difference (0-255, 5 px box) below which plate and photo are the same pixels
+FRAME_RGB = (139, 0, 0)  # layers_from_markup.py: "frame (cave walls)"
 PILLARS_RGB = (0, 80, 140)  # layers_from_markup.py: "pillars and spire"
 BEHIND_PX = 120  # how far behind the cave frame the pillars carry on (beyond any camera move)
 KEPT_ERODE_PX = 3  # the kept strip loses this much (scene pixels) to the near rock: its rim moves with it
@@ -87,6 +88,12 @@ def main() -> None:
         same = ndi.uniform_filter(np.abs(photo.astype(np.float32) - mid_rgb.astype(np.float32)).mean(-1), 5) < KEPT_DIFF
         pillars = ndi.binary_opening(M & same, iterations=2)
         vista &= ~pillars
+        # The cave is only what the markup paints as cave. Anything else outside the kept canyon and the pillars
+        # (the gap between a loose first cut and the tight pillar cut-out, around the spire) is vista: the plate
+        # painted it. As cave it floated at cave distance as a lit halo around the spire.
+        m = np.asarray(Image.open(args.markup).convert("RGB").resize((W, H), Image.NEAREST)).astype(np.float64)
+        cave = np.linalg.norm(m - np.array(FRAME_RGB, np.float64), axis=-1) < 60
+        vista |= ~cave & ~pillars
     elif args.pillars:
         a = np.asarray(Image.open(args.pillars).convert("RGBA").resize((W, H), Image.LANCZOS))[..., 3]
         pillars = a > 127
@@ -144,9 +151,11 @@ def main() -> None:
     bg_albedo = np.where(kept[..., None], albedo, plate_albedo)
     print(f"  plate albedo gain {np.round(gain, 3)}")
 
+    rel = lambda name: os.path.normpath(Path("..") / args.scene.name / name).replace("\\", "/")
     layers = []  # (name, photo, albedo, normal, depth), front to back, behind the main layer
     if mid is not None:
-        # 5. Middle layer depth: MoGe on the middle over the plate, fitted onto the visible pillars' distances.
+        # 5. Middle layer depth: MoGe on the middle over the plate (it needs the surroundings to judge distance),
+        #    fitted onto the visible pillars' distances.
         comp = np.where(M[..., None], mid_rgb, plate)
         print("MoGe-2 on the middle layer over the plate ...")
         zc, valid_c, n_comp = moge(comp, args.resolution_level)
@@ -160,8 +169,13 @@ def main() -> None:
         mid_albedo = np.where(pillars[..., None], albedo, mid_albedo)
         print(f"  middle: log depth stretch {a2:.2f}, {np.quantile(z_mid[M], 0.02):.0f}-{np.quantile(z_mid[M], 0.98):.0f} m; "
               f"{M.mean() * 100:.1f}% of the picture ({(M & ~pillars).mean() * 100:.1f}% painted)")
-        layers.append(("mid", comp, np.where(M[..., None], mid_albedo, bg_albedo), np.where(M[..., None], n_comp, n_plate),
-                       np.where(M, z_mid, z_plate)))
+        # A cut-out: see-through outside the outline (alpha), and everything else carried a little past it from the
+        # nearest pixel inside, so filtering at the edge doesn't pick up other colours and the depth has no step there
+        # (a step would make the renderer stretch the edge into spikes).
+        _, (iy, ix) = ndi.distance_transform_edt(~M, return_indices=True)
+        ext = lambda img: img[iy, ix]
+        mid_photo = np.dstack([ext(mid_rgb), M.astype(np.uint8) * 255])
+        layers.append(("mid", mid_photo, ext(mid_albedo), ext(np.where(M[..., None], n_comp, n_plate)), ext(z_mid)))
         layers.append(("bg", plate, bg_albedo, n_plate, z_plate))
     else:
         # Near rock behind near rock (cave wall over a pillar, the spire against the right wall): what's hidden
@@ -179,7 +193,21 @@ def main() -> None:
             print(f"  pillars behind the cave frame: {rock.mean() * 100:.2f}% of the picture")
         layers.append(("bg", bg_photo, bg_albedo, bg_normal, z_plate))
 
+    main_files = {"image": rel(info["image"]), "albedo": rel(info["albedo"])}
+    if mid is not None:
+        # The main layer becomes a cut-out of the cave alone (the pillars are in the middle layer, the vista behind),
+        # carried past its outline from the nearest cave pixel like the middle layer, so it has no depth step there.
+        _, (iy, ix) = ndi.distance_transform_edt(~frame, return_indices=True)
+        z_mesh, n_main = z_main[iy, ix], n_main[iy, ix]
+        main_files = {"image": "photo.png", "albedo": "albedo.png", "meshDepth": "mesh_depth.bin"}
+        cave_photo = np.dstack([photo[iy, ix], frame.astype(np.uint8) * 255])
+        cave_albedo = albedo[iy, ix]
+
     args.out.mkdir(parents=True, exist_ok=True)
+    if mid is not None:
+        Image.fromarray(cave_photo).save(args.out / "photo.png")
+        Image.fromarray(cave_albedo).save(args.out / "albedo.png")
+        z_mesh.astype("<f4").tofile(args.out / "mesh_depth.bin")
     for old in list(args.out.glob("mid_*")) + list(args.out.glob("bg_*")):
         old.unlink()
     z_main.astype("<f4").tofile(args.out / "depth.bin")
@@ -193,9 +221,7 @@ def main() -> None:
         Image.fromarray(nrm).save(args.out / f"{name}_normal.png")
         background.append({"depth": f"{name}_depth.bin", "image": f"{name}_photo.png", "albedo": f"{name}_albedo.png", "normal": f"{name}_normal.png"})
 
-    rel = lambda name: os.path.normpath(Path("..") / args.scene.name / name).replace("\\", "/")
-    scene = {**info, "image": rel(info["image"]),
-             "albedo": rel(info["albedo"]), "normal": "normal.png", "depth": "depth.bin",
+    scene = {**info, **main_files, "normal": "normal.png", "depth": "depth.bin",
              "depthModel": f"near rock from {args.scene.name}, vista: MoGe-2 on {args.plate.name}",
              "background": background if len(background) > 1 else background[0]}
     (args.out / "scene.json").write_text(json.dumps(scene, indent=2))

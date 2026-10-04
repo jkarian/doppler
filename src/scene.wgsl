@@ -177,6 +177,10 @@ struct Nooks {
 };
 @group(0) @binding(9) var<storage, read> nooks: Nooks;
 @group(0) @binding(10) var shadowTex2: texture_2d<f32>;  // nook lights 4-7's visibility (see fs_shadow)
+// The depth the mesh is built from. Usually depthTex itself; a cut-out layer (the cave in front of painted layers)
+// has its own, carried past its outline so the mesh has no step there to stretch (depthTex stays the whole
+// picture's depth, for shadows, shafts and everything else that reads the scene).
+@group(0) @binding(11) var meshDepthTex: texture_2d<f32>;
 const NOOK_SHADOWS = 7u;
 
 // Bright at the light, easing to nothing at the radius.
@@ -398,6 +402,18 @@ fn depthAt(uv: vec2f) -> f32 {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+fn meshDepthAt(uv: vec2f) -> f32 {
+  let size = vec2i(u.imgSize);
+  let t = uv * u.imgSize - 0.5;
+  let i = vec2i(floor(t));
+  let f = fract(t);
+  let a = textureLoad(meshDepthTex, clamp(i, vec2i(0), size - 1), 0).r;
+  let b = textureLoad(meshDepthTex, clamp(i + vec2i(1, 0), vec2i(0), size - 1), 0).r;
+  let c = textureLoad(meshDepthTex, clamp(i + vec2i(0, 1), vec2i(0), size - 1), 0).r;
+  let d = textureLoad(meshDepthTex, clamp(i + vec2i(1, 1), vec2i(0), size - 1), 0).r;
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 // Unblended depth: bilinear blending across silhouettes invents geometry that casts thin false shadows.
 fn depthNearest(uv: vec2f) -> f32 {
   let i = clamp(vec2i(uv * u.imgSize), vec2i(0), vec2i(u.imgSize) - 1);
@@ -433,17 +449,17 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   // A square whose corners sit at very different depths spans a silhouette (near rock against far
   // canyon), not a surface: stretched by parallax it smears into hairs. Put the whole square at the
   // far side's depth so the near edge stays crisp and nothing stretches across the gap.
-  let d00 = depthAt(vec2f(g0) / u.grid);
-  let d10 = depthAt(vec2f(g0 + vec2u(1, 0)) / u.grid);
-  let d01 = depthAt(vec2f(g0 + vec2u(0, 1)) / u.grid);
-  let d11 = depthAt(vec2f(g0 + vec2u(1, 1)) / u.grid);
+  let d00 = meshDepthAt(vec2f(g0) / u.grid);
+  let d10 = meshDepthAt(vec2f(g0 + vec2u(1, 0)) / u.grid);
+  let d01 = meshDepthAt(vec2f(g0 + vec2u(0, 1)) / u.grid);
+  let d11 = meshDepthAt(vec2f(g0 + vec2u(1, 1)) / u.grid);
   let zmin = min(min(d00, d10), min(d01, d11));
   let zmax = max(max(d00, d10), max(d01, d11));
   let silhouette = zmax > zmin * 1.08;
   // Without a background layer, the square moves to the far side's depth: crisp edges, but it detaches from
   // its near neighbours and cracks open (dark dots) when the camera moves. With one, the square stays a
   // continuous stretched surface (no cracks), pushed back behind the hidden rock below.
-  let z = select(depthAt(uv), zmax, silhouette && u.up.w < 0.5);
+  let z = select(meshDepthAt(uv), zmax, silhouette && u.up.w < 0.5);
 
   let pc = viewPos(uv, z) - u.camPos;
   let tanXY = vec2f(u.tanHalfFov * u.aspect, u.tanHalfFov);
@@ -654,7 +670,11 @@ fn toSrgb(c: vec3f) -> vec3f {
 fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @interpolate(flat) layer: u32) -> @location(0) vec4f {
   // Implicit-level sampling: the mip level follows how small the picture is drawn on screen.
   let albedo = textureSample(albedoTex, samp, uv).rgb;   // de-lit, linear (srgb texture)
-  let photo = textureSample(photoTex, samp, uv).rgb;
+  let photoA = textureSample(photoTex, samp, uv);
+  let photo = photoA.rgb;
+  // Cut-out layers (tools/vista_plate.py: the cave, the pillars) are see-through outside their outline, so the
+  // layers behind show there, with no stretched edge between them.
+  if (photoA.a < 0.5) { discard; }
   // normal.png uses standard colours (z toward the camera); scene space has z into the scene.
   var n = normalize((textureSample(normalTex, samp, uv).rgb * 2.0 - 1.0) * vec3f(1.0, 1.0, -1.0));
   let z = depthAt(uv);
