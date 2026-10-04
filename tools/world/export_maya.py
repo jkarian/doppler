@@ -23,6 +23,8 @@ scene, mesh, name = repo / sys.argv[1], repo / sys.argv[2], sys.argv[3]
 # Optional 4th argument: scale to real size, e.g. feet per model unit (then 1 Maya unit = 1 foot). The mesh and the
 # camera's position scale together, so the view through the camera is unchanged.
 S = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
+# Optional 5th argument: output name (default <name>_matched).
+stem = sys.argv[5] if len(sys.argv) > 5 else f"{name}_matched"
 info = json.loads((scene / "scene.json").read_text())
 cam = json.loads((scene / "world" / name / "camera.json").read_text())
 V = cam["world_to_camera"]
@@ -60,13 +62,13 @@ cmds.setAttr(f"{cam_s}.nearClipPlane", 0.001 * S)
 cmds.setAttr(f"{cam_s}.farClipPlane", 1000 * S)
 
 out = mesh.parent
-abc = out / f"{name}_matched.abc"
+abc = out / f"{stem}.abc"
 cmds.AbcExport(j=f"-frameRange 1 1 -uvWrite -worldSpace -writeVisibility -dataFormat ogawa -root |{group} -root |{cam_t} -file {abc.as_posix()}")
 
 photo = (scene / info["image"]).resolve()
 ip = cmds.imagePlane(camera=cam_s, fileName=photo.as_posix())
 cmds.setAttr(f"{ip[1]}.depth", 50 * S)
-ma = out / f"{name}_matched.ma"
+ma = out / f"{stem}.ma"
 cmds.file(rename=str(ma))
 cmds.file(save=True, type="mayaAscii")
 print(f"camera at {[round(p, 4) for p in pos]}, focal {focal:.2f} mm on 36 x {v_mm:.2f} mm")
