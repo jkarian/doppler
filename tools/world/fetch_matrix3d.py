@@ -35,6 +35,9 @@ get("Wan2.2-TI2V-5B (video base)", lambda: snapshot_download(
 get("Wan2.2 text encoder", lambda: hf_hub_download(
     "Wan-AI/Wan2.2-TI2V-5B", "models_t5_umt5-xxl-enc-bf16.pth", local_dir=CK / "Wan-AI/Wan2.2-TI2V-5B"))
 get("MoGe v1", lambda: hf_hub_download("Ruicheng/moge-vitl", "model.pt", local_dir=CK / "moge"))
+# The reconstruction step super-resolves its rendered views with StableSR.
+for f in ("stablesr_turbo.ckpt", "vqgan_cfw_00011.ckpt"):
+    get(f"StableSR {f}", lambda f=f: hf_hub_download("Iceclear/StableSR", f, local_dir=CK / "StableSR"))
 get("Matrix-3D 5B pano-video LoRA", lambda: hf_hub_download(
     "Skywork/Matrix-3D", "checkpoints/pano_video_gen_720p_5b.safetensors", local_dir=CK / "_skywork"))
 get("Matrix-3D pano-image LoRA", lambda: hf_hub_download(
