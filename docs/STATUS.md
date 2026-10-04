@@ -174,6 +174,19 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      15,000 iterations, densify only to 1,501 or the Gaussians fill the card) -> scenes/canyon/world/matrix_vista_hr/
      generated_3dgs_opt.ply (728 MB). Clearly sharper (peaks, cliff edges, rock texture), not photo-sharp up close.
      Training ~18 min; the depth step ~25 min (writes big per-keyframe meshes to D:).
+   - **Vista framing (2026-10-04):** `tools/world/frame_vista.py` composites a vista splat behind the photo's near
+     layers (markup frame + pillars/spire), colour-matched in Lab. Cleanest from points on the generator's own path
+     (`--at 0,0,1.48`, yaw 0 or -12, pitch +2); off-path views turn to confetti. Verdict: the combination reads as one
+     place, but the splat is soft (mid-distance rock blurs) and straight ahead Matrix's world is a gorge, not vast.
+     **User: "I need things sharp."** => splats from a 720p world model are the wrong tool for the background
+     (~8 px/degree vs the photo's ~35).
+   - **NEXT (handoff 2026-10-04):** matte-painting background: generate the vista as a high-res 2D plate from our
+     camera's view (FLUX Fill here, or the user's Qwen-Image / Flux 2 Klein / Z-Image in C:\AI_Models), upscale 4-8K
+     (SeedVR2 or the user's Topaz), MoGe depth mapped to the markup's distances (3 km, 30 km) for subtle parallax;
+     the photo's near/mid layers (cave, pillars, spire) in front, 4K and real. **Open question for the user:** (a) keep
+     the photo's real canyon through the opening and paint only what's hidden/beyond the frame, or (b) repaint all
+     beyond the pillars as the vast open vista. Then build the scene from canyon-layers (true scale) and retune the
+     graph for metres (nook radii, near threshold, GapHorizon read -43 there).
    - **Matrix-3D (parked, run last):** environment built (`setup_matrix3d.sh`, venv-matrix), models in
      C:\AI_Models\matrix3d, panorama done (scenes/canyon/world/matrix/pano_img.jpg). The video step is killed for
      out of memory (24 GB WSL RAM, 8 GB swap). Plan agreed with the user: after a PC restart, with nothing else
