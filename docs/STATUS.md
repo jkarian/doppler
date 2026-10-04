@@ -194,10 +194,15 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      images/canyon_middle.png` -> scenes/canyon-vista: main = photo (cave), then middle layer, then vista plate.
      Depth on each plate on its own (MoGe-2), mapped onto the markup distances: fixes the far gorge flattening at the
      river bend (the scan now recedes along it). The renderer takes a list of layers behind the main one.
+     All three are cut-outs that stack (lesson learned the hard way): the cave and the middle layer are see-through
+     outside their outlines (alpha, discarded in the shader), with their mesh depth carried past the outline so no
+     triangle stretches across a depth step (scene.json `meshDepth` for the cave; `depth` stays the whole picture's,
+     for shadows/shafts/sky). Pushing stretched edges back or dropping them by a depth threshold both failed
+     (spikes; cracks in the cave). The cave is only what the markup paints as cave.
      View: `?scene=canyon-vista&graph=vista-test&cam=sweep` (vista-test: MRI scan always on, over 100 m-3 km;
      `cam=sweep` / `cam=x,y` move or hold the camera for parallax checks). Open items: lighting still tuned for the
-     old squashed scale (overexposed at drops: nook radii, near threshold, GapHorizon); a few orange specks on the
-     left pillar's edge at 2x sway; the dark nook at the left mesa's base is in the painting; mountains map to ~13 km
+     old squashed scale (overexposed at drops: nook radii, near threshold, GapHorizon); shadows are computed once
+     from the front depth and reused by the layers behind; the dark nook at the left mesa's base is in the painting; mountains map to ~13 km
      (markup says 20-30). User's idea, agreed direction: a general camera-mapping tool (split into layers, find
      where each needs "back information", inpaint it, depth per layer) = the one-command image-to-scene goal.
    - **Matrix-3D (parked, run last):** environment built (`setup_matrix3d.sh`, venv-matrix), models in
