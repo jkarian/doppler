@@ -32,6 +32,8 @@ def get(what, fn):
 get("Wan2.2-TI2V-5B (video base)", lambda: snapshot_download(
     "Wan-AI/Wan2.2-TI2V-5B", local_dir=CK / "Wan-AI/Wan2.2-TI2V-5B",
     allow_patterns=["models_t5_umt5-xxl-enc-bf16.pth", "diffusion_pytorch_model*.safetensors*", "Wan2.2_VAE.pth", "config.json", "google/*"]))
+get("Wan2.2 text encoder", lambda: hf_hub_download(
+    "Wan-AI/Wan2.2-TI2V-5B", "models_t5_umt5-xxl-enc-bf16.pth", local_dir=CK / "Wan-AI/Wan2.2-TI2V-5B"))
 get("MoGe v1", lambda: hf_hub_download("Ruicheng/moge-vitl", "model.pt", local_dir=CK / "moge"))
 get("Matrix-3D 5B pano-video LoRA", lambda: hf_hub_download(
     "Skywork/Matrix-3D", "checkpoints/pano_video_gen_720p_5b.safetensors", local_dir=CK / "_skywork"))

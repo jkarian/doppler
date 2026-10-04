@@ -39,4 +39,6 @@ bash -e /tmp/install_matrix3d.sh
 pip uninstall -q -y utils3d
 pip install -q --no-build-isolation ./code/pano_init/utils3d
 python -c "import utils3d.torch as u; assert hasattr(u, 'image_uv'), 'utils3d too new'"
+# OpenCV 5's wheels can't write .exr (the panorama depth step does); MoGe v1 was written against 4.10.
+pip install -q "opencv-python==4.10.0.84" "opencv-python-headless==4.10.0.84" "numpy<2"
 python -c "import torch, diffsynth, nvdiffrast.torch, simple_knn; print('matrix-3d env ok', torch.__version__, torch.cuda.is_available())"

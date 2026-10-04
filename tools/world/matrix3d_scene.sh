@@ -9,6 +9,7 @@ SCENE=$REPO/$1
 PROMPT=$2
 OUT=$SCENE/world/matrix
 export PATH=/usr/local/cuda-12.8/bin:$PATH CUDA_HOME=/usr/local/cuda-12.8 HF_HOME=/mnt/c/AI_Models/huggingface
+export OPENCV_IO_ENABLE_OPENEXR=1  # the panorama depth step writes .exr
 . /opt/world/venv-matrix/bin/activate
 cd /opt/world/Matrix-3D
 
