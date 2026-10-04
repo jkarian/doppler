@@ -45,3 +45,20 @@ elif 'diffusion_pytorch_model*.safetensors", offload_device=None' in src:
     print("already patched", f)
 else:
     raise SystemExit(f"unexpected contents in {f}: update matrix3d_patches.py")
+
+# Splat training: torch.quantile refuses inputs over ~16M values, which a higher-resolution run exceeds. Estimate the
+# threshold from a random sample instead (same answer for practical purposes).
+f = ROOT / "Pano_GS_Opt/scene/gaussian_model.py"
+src = f.read_text()
+old = "        Q = torch.quantile(grads_abs.reshape(-1), 1 - ratio)"
+new = ("        flat = grads_abs.reshape(-1)\n"
+       "        if flat.numel() > 10_000_000:\n"
+       "            flat = flat[torch.randint(0, flat.numel(), (10_000_000,), device=flat.device)]\n"
+       "        Q = torch.quantile(flat, 1 - ratio)")
+if old in src:
+    f.write_text(src.replace(old, new))
+    print("quantile on a sample", f)
+elif "flat = grads_abs.reshape(-1)" in src:
+    print("already patched", f)
+else:
+    raise SystemExit(f"unexpected contents in {f}: update matrix3d_patches.py")
