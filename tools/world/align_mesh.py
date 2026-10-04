@@ -115,6 +115,7 @@ def main() -> None:
     ap.add_argument("mesh", type=Path)
     ap.add_argument("--out", default="tripo")
     ap.add_argument("--work", type=int, default=1024, help="width used for matching")
+    ap.add_argument("--refine", action="store_true", help="then refine the camera against the whole frame (dense flow), near frame weighted")
     args = ap.parse_args()
 
     info = json.loads((args.scene / "scene.json").read_text())
@@ -173,6 +174,50 @@ def main() -> None:
         V[:3, :3] = cv2.Rodrigues(rv)[0]
         V[:3, 3] = tv.ravel()
         print(f"  pass {it + 1}: {len(X)} matches, {n_in} agree, median error {err:.1f} px, lens {fov:.1f} deg vertical")
+
+    # 2b. Refine against the whole frame: point matches land mostly on the far canyon's distinct texture, and a generated
+    # model's far canyon and near walls aren't proportioned like the photo's, so that camera can be wrong for the cave
+    # mouth we look through. Nudge position, turn and lens to minimise how far the render's pixels sit from the photo's
+    # (dense optical flow), with the near frame (parts.json's non-freestanding near parts, e.g. cave walls) weighted.
+    if args.refine:
+        from scipy.optimize import minimize
+        from scipy.spatial.transform import Rotation
+
+        ww, hh = 640, round(640 * H / W)
+        pg_s = clahe.apply(cv2.cvtColor(np.asarray(Image.open(args.scene / info["image"]).convert("RGB").resize((ww, hh), Image.LANCZOS)), cv2.COLOR_RGB2GRAY))
+        weight = np.ones((hh, ww), np.float32)
+        parts_file = args.scene / "parts.json"
+        if parts_file.exists():
+            parts = json.loads(parts_file.read_text())["parts"]
+            near_order = min(p["order"] for p in parts)
+            for p in parts:
+                f = args.scene / "parts" / f"{p['name'].replace(' ', '_')}.png"
+                if p["order"] == near_order and f.exists():
+                    weight[np.asarray(Image.open(f).convert("L").resize((ww, hh), Image.NEAREST)) > 127] = 4.0
+        dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+        V0, f0 = V.copy(), fov
+        scale = rad
+
+        def camera(x):
+            Vx = np.eye(4)
+            Vx[:3, :3] = Rotation.from_rotvec(x[:3] * 0.05).as_matrix() @ V0[:3, :3]
+            Vx[:3, 3] = V0[:3, 3] + x[3:6] * 0.05 * scale
+            return Vx, f0 * math.exp(x[6] * 0.1)
+
+        def cost(x):
+            Vx, fx = camera(x)
+            rgb, _, _, cov = R.render(Vx, K_for(fx, ww, hh), ww, hh)[0]
+            g = clahe.apply(cv2.cvtColor((rgb * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY))
+            flow = dis.calc(pg_s, g, None)
+            mag = np.hypot(flow[..., 0], flow[..., 1])
+            w = weight * (cov > 0) + 0.25 * (cov == 0)  # where the model has nothing, it should be sky or far
+            return float((np.minimum(mag, 60) * w).sum() / w.sum())
+
+        x0 = np.zeros(7)
+        c0 = cost(x0)
+        res = minimize(cost, x0, method="Nelder-Mead", options={"maxiter": 600, "xatol": 1e-3, "fatol": 1e-3, "initial_simplex": np.vstack([x0, np.eye(7) * 0.5])})
+        V, fov = camera(res.x)
+        print(f"  refined: mean pixel offset {c0:.1f} -> {res.fun:.1f} px at {ww} wide; lens {fov:.1f} deg vertical")
 
     # 3. Bake at the photo's size: the visible surface and the one behind it.
     out = args.scene / "world" / args.out
