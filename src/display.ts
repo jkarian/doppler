@@ -402,9 +402,19 @@ async function main() {
   const cam = { zoom: 1, center: [0, 0], cover: true, sway: true, swayAmount: 0.05 };
   // Camera motion comes from the graph's Camera node, in units of the sway amount.
   let graphOut: RenderOut = {};
+  // For checking parallax, instead of the graph's camera: ?cam=x,y[,z] holds a fixed offset (in sway units),
+  // ?cam=sweep[,size] sweeps slowly left-right and up-down (default size 2).
+  const camArg = params.get("cam")?.split(",");
+  const camSweep = camArg?.[0] === "sweep" ? Number(camArg[1] ?? 2) : 0;
+  const camHold = camArg && !camSweep ? camArg.map(Number) : undefined;
   const camPos = (_t?: number): Vec3 => {
-    if (!cam.sway || !graphOut.camera) return [0, 0, 0];
     const a = (cam.swayAmount * tanHalfFov * aspect) / parallaxSpan;
+    if (camSweep) {
+      const s = _t ?? performance.now() / 1000; // music time when given, so recorded clips sweep too
+      return [camSweep * Math.sin(s * 0.5) * a, 0.4 * camSweep * Math.sin(s * 0.31) * a, 0];
+    }
+    if (camHold) return [camHold[0] * a, (camHold[1] ?? 0) * a, (camHold[2] ?? 0) * a];
+    if (!cam.sway || !graphOut.camera) return [0, 0, 0];
     const c = graphOut.camera;
     return [c.swayX * a, c.swayY * a, c.pushZ * a];
   };
