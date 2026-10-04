@@ -1,4 +1,4 @@
-﻿"""Make a scene from a baked splat (bake_splat.py): its depth, and its background layer from what the splat has
+"""Make a scene from a baked splat (bake_splat.py): its depth, and its background layer from what the splat has
 behind the near rock instead of a painted guess.
 
     python tools/world/make_splat_scene.py scenes/canyon scenes/canyon-splat
@@ -31,16 +31,39 @@ def main() -> None:
     ap.add_argument("out", type=Path)
     ap.add_argument("--sway", type=float, default=0.05)
     ap.add_argument("--margin", type=float, default=1.5)
+    ap.add_argument("--bake", type=Path, default=None, help="folder with front/behind renders (default <scene>/world/bake)")
+    ap.add_argument("--flow-align", action="store_true",
+                    help="warp the renders onto the photo by optical flow first (for a model whose shapes are close but "
+                         "not exact, e.g. from Tripo: its edges land on the photo's edges)")
     args = ap.parse_args()
 
     info = json.loads((args.scene / "scene.json").read_text())
     W, H, far = info["width"], info["height"], info["far"]
     old = np.fromfile(args.scene / info["depth"], dtype="<f4").reshape(H, W).astype(np.float64)
     sky = old >= far * 0.98
-    bake = args.scene / "world" / "bake"
+    bake = args.bake or args.scene / "world" / "bake"
     fr, bh = np.load(bake / "front.npz"), np.load(bake / "behind.npz")
     zf, af = fr["depth"].astype(np.float64), fr["alpha"]
     zb, ab = bh["depth"].astype(np.float64), bh["alpha"]
+    behind_rgb = np.asarray(Image.open(bake / "behind.png").convert("RGB")).astype(np.float32)
+    if args.flow_align:
+        # Where each photo pixel's content sits in the render (dense optical flow, photo -> render), then pull every
+        # render layer back onto the photo's pixels. Nearest for depth and coverage (no blending across edges).
+        g1 = cv2.cvtColor(np.asarray(Image.open(args.scene / info["image"]).convert("RGB")), cv2.COLOR_RGB2GRAY)
+        g2 = cv2.cvtColor(np.asarray(Image.open(bake / "front.png").convert("RGB")), cv2.COLOR_RGB2GRAY)
+        s = 1920 / W
+        a1, a2 = cv2.resize(g1, None, fx=s, fy=s, interpolation=cv2.INTER_AREA), cv2.resize(g2, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        clahe = cv2.createCLAHE(3.0, (8, 8))
+        dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+        flow = dis.calc(clahe.apply(a1), clahe.apply(a2), None)
+        flow = cv2.resize(flow, (W, H), interpolation=cv2.INTER_LINEAR) / s
+        gx, gy = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+        mx, my = gx + flow[..., 0], gy + flow[..., 1]
+        warp = lambda a, how=cv2.INTER_NEAREST: cv2.remap(a.astype(np.float32), mx, my, how, borderMode=cv2.BORDER_REPLICATE)
+        zf, af, zb, ab = warp(zf).astype(np.float64), warp(af), warp(zb).astype(np.float64), warp(ab)
+        behind_rgb = warp(behind_rgb, cv2.INTER_LINEAR)
+        print(f"flow-aligned: median shift {np.median(np.hypot(flow[..., 0], flow[..., 1])):.1f} px, 95th percentile "
+              f"{np.percentile(np.hypot(flow[..., 0], flow[..., 1]), 95):.1f} px")
 
     # The splat's depths on the old scene's range: match the distributions of log depth over the land.
     ok = ~sky & (af > 0.5) & (zf > 0)
@@ -61,7 +84,7 @@ def main() -> None:
     new["albedo"] = str(rel / info.get("albedo", info["image"])).replace("\\", "/")
     new["normal"] = str(rel / info["normal"]).replace("\\", "/")
     new["depth"] = "depth.bin"
-    new["depthModel"] = "Gaussian splat from dreamed views (mapped onto " + args.scene.name + ")"
+    new["depthModel"] = f"{bake.name} renders (mapped onto {args.scene.name})" + (", flow-aligned" if args.flow_align else "")
     new.pop("background", None)
     z.tofile(args.out / "depth.bin")
 
@@ -88,7 +111,7 @@ def main() -> None:
     Image.fromarray(band_full.astype(np.uint8) * 255).save(args.out / "bg_mask.png")
     print(f"band covers {band_full.mean() * 100:.1f}% of the picture; the splat saw behind {seen.sum() / max(band_full.sum(), 1) * 100:.0f}% of it")
 
-    behind = np.asarray(Image.open(bake / "behind.png").convert("RGB")).astype(np.float32)
+    behind = behind_rgb
     photo = np.asarray(Image.open(args.scene / info["image"]).convert("RGB")).astype(np.float32)
     albedo = np.asarray(Image.open(args.scene / info.get("albedo", info["image"])).convert("RGB")).astype(np.float32)
     ratio = (albedo[~sky].mean(0) + 1) / (photo[~sky].mean(0) + 1)  # photo -> albedo, roughly
