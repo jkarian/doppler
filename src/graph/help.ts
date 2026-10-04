@@ -77,7 +77,7 @@ const HELP: Record<string, string> = {
   "NookLights.nearDecay": "Seconds for the near lights to fade after a big moment.",
   "NookLights.decay": "Seconds for the mid and far lights to fade after each tick or tock.",
   "NookLights.attack": "Seconds for a light to come on.",
-  "NookLights.pattern": "0: hits walk through the lights in order. 1: ticks fire the left half, tocks the right. 2: random. 3: sweeps from the nearest light outward. 4: from the farthest inward.",
+  "NookLights.pattern": "0: hits walk through the lights in order. 1: ticks fire the left half, tocks the right. 2: random. 3: sweeps through every light, nearest first, outward (near lights included; they still flash on drops too). 4: farthest first, inward.",
 
   // Lasers
   "SkyLaser.from": "0 = beams from the sky, 1 = rigs standing on the rock.",

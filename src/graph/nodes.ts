@@ -773,7 +773,7 @@ const defs: NodeDef[] = [
       "decay. positions: u,v[,area,brightness] picture points separated by ; (place them on the display with N: drag, scroll for " +
       "area, shift+scroll for brightness). Lights further than near feet (mid and far ground) are fired by the sounds " +
       "(names separated by |): pattern 0 walks through them in order, 1 sends the first sound to the left half and the second " +
-      "to the right, 2 is seeded random, 3 sweeps from near to far, 4 from far to near. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
+      "to the right, 2 is seeded random, 3 sweeps every light (near ones too) from near to far, 4 from far to near. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
       "by |): all of them come on together and fade over nearDecay. Up to 16 show at once, the brightest 7 with shadows.",
     inputs: [
       { name: "positions", default: "0.5,0.7", kind: "const" },
@@ -806,7 +806,8 @@ const defs: NodeDef[] = [
       const n = far.length;
       const order = [...far].sort((a, b) => pts[a][0] - pts[b][0]); // left to right
       const feet = pts.map(([u, v]) => ctx.scene.depthFeet?.(u, v) ?? 0);
-      const byDepth = [...far].sort((a, b) => feet[a] - feet[b]); // near to far
+      // Near to far over every light: a sweep only reads if it starts in front (near ones still also fire on moments).
+      const byDepth = pts.map((_, k) => k).sort((a, b) => feet[a] - feet[b]);
       const groups = String(c.sounds).split("|").map((s) => s.trim()).filter(Boolean);
       const pattern = Math.round(num(c.pattern));
       const rand = seeded(num(c.seed) * 7919 + 13);
@@ -831,7 +832,8 @@ const defs: NodeDef[] = [
           while (n > 1 && light === last);
         } else if (pattern === 3 || pattern === 4) {
           // Sweep by distance: nearest outward (3) or farthest inward (4), then start over.
-          light = byDepth[pattern === 3 ? walk++ % n : n - 1 - (walk++ % n)];
+          const m = byDepth.length;
+          light = byDepth[pattern === 3 ? walk++ % m : m - 1 - (walk++ % m)];
         } else light = order[walk++ % n];
         last = light;
         h[2] = light;
