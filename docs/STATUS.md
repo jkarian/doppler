@@ -152,6 +152,10 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      the photo, then each freestanding part of parts.json snapped onto its outline by template matching).
      Spire and left mesa snap; fin and tree too uncertain. User's idea for later: camera-project the photo onto
      the mesh, bake into its UV texture, repair stretched texels (a real textured mesh: archetype 3 renderer).
+   - Maya hand-off: `3d/tripo/tripo_clean_unlevelled.ma`/`.abc` (200k mesh `canyon_mesh` + `tripo_cam1`, real size in
+     cm, 1400 ft per Tripo unit, no groups) is the one the user works in. Levelling to our 23-degree pitch made the
+     spires lean back: the user judged Tripo's near-level camera (-2.4 deg) right. Our scene's pitch (scene.json "up")
+     may be too steep (earlier estimates ranged 5-23 degrees); revisit, as it sets the sun's and rigs' real angles.
    - **Matrix-3D (parked, run last):** environment built (`setup_matrix3d.sh`, venv-matrix), models in
      C:\AI_Models\matrix3d, panorama done (scenes/canyon/world/matrix/pano_img.jpg). The video step is killed for
      out of memory (24 GB WSL RAM, 8 GB swap). Plan agreed with the user: after a PC restart, with nothing else
