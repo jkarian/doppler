@@ -786,6 +786,24 @@
     40,
     40
    ]
+  },
+  {
+   "id": "setupScanners",
+   "type": "Setup",
+   "name": "Setup: scanning lasers",
+   "params": {
+    "on": 1,
+    "intro": 0,
+    "build": 0,
+    "drop": 1,
+    "breakdown": 0,
+    "normal": 0,
+    "outro": 0
+   },
+   "pos": [
+    1630,
+    1260
+   ]
   }
  ],
  "wires": [
@@ -1577,6 +1595,16 @@
    "to": [
     "sun",
     "color"
+   ]
+  },
+  {
+   "from": [
+    "setupScanners",
+    "level"
+   ],
+   "to": [
+    "skyBeams",
+    "scan"
    ]
   }
  ]

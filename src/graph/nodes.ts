@@ -57,6 +57,11 @@ export interface SkyLaserOut {
   intensity: number;
   hit: number;
   rigs?: number[][]; // ground rigs placed by hand: [u, v, turn, tilt, cone] (degrees); empty = seeded random spots
+  scan: number; // ground rigs: > 0.5 turns each beam into a scanning laser drawing a triangular plane of light
+  scanSpread: number; // degrees across each plane
+  scanLines: number; // scan lines drawn across the plane (they shimmer as the scanner runs)
+  scanBright: number; // brightness of the plane itself
+  flicker: number; // 0..1: how much the scanners flicker
 }
 
 export interface LaserOut {
@@ -681,7 +686,9 @@ const defs: NodeDef[] = [
       "Scattered lasers. from 0 (sky): count straight beams come down onto random spots on the rock, new spots each " +
       "time floor(trigger) changes; sheet 1 makes them vertical curtains. from 1 (ground): count laser rigs sit at fixed " +
       "random spots on the rock and each fires a beam in a random direction (elevation elevMin-elevMax), re-aimed each " +
-      "trigger step. The same track always gives the same choices. Shares the 4-fixture limit with Laser. " +
+      "trigger step. The same track always gives the same choices. scan 1 turns each rig into a scanning laser: a flickering " +
+      "triangular plane of light, scanSpread degrees wide, aimed the same way. Shares the 16-fixture limit with Laser " +
+      "(a scanning rig takes one fixture each). " +
       "rigs (ground): rigs placed by hand (N on the display, Tab to laser rigs), u,v,turn,tilt,cone; ... in degrees (turn 0 = " +
       "into the scene, positive right; tilt up from level). Each re-aims at random within its cone every trigger step. " +
       "Empty: rigs at seeded random spots.",
@@ -710,6 +717,11 @@ const defs: NodeDef[] = [
       { name: "color", default: [0.2, 0.6, 1] },
       { name: "intensity", default: 1, min: 0, step: 0.05 },
       { name: "hit", default: 1.5, min: 0, step: 0.05 },
+      { name: "scan", default: 0, min: 0, max: 1, step: 1, doc: "ground rigs: 1 turns each beam into a scanning laser, a triangular plane of light like a club laser (wire a Setup node's level here to switch with the song)" },
+      { name: "scanSpread", default: 30, min: 2, max: 120, step: 1, doc: "degrees across each scanning plane" },
+      { name: "scanLines", default: 12, min: 2, max: 24, step: 1, doc: "scan lines drawn across each plane" },
+      { name: "scanBright", default: 1, min: 0, max: 10, step: 0.05, doc: "brightness of the plane of light" },
+      { name: "flicker", default: 0.3, min: 0, max: 1, step: 0.05, doc: "how much the scanners flicker" },
       { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
     outputs: [],
@@ -729,6 +741,8 @@ const defs: NodeDef[] = [
         drift: Math.max(0, num(i.drift)), driftSpeed: Math.max(0, num(i.driftSpeed)), t: ctx.t,
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
         width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity, hit: Math.max(0, num(i.hit)),
+        scan: clamp(num(i.scan), 0, 1), scanSpread: clamp(num(i.scanSpread), 2, 120), scanLines: Math.round(clamp(num(i.scanLines), 2, 24)),
+        scanBright: Math.max(0, num(i.scanBright)), flicker: clamp(num(i.flicker), 0, 1),
       });
       return {};
     },

@@ -185,11 +185,11 @@ fn nookFall(d: f32, r: f32) -> f32 {
   return w * w / (1.0 + 2.0 * x * x);
 }
 
-// Lasers: up to 4 fixtures of up to 24 beams. Beam directions and lengths (to the first rock they hit)
+// Lasers: up to 16 fixtures of up to 24 beams. Beam directions and lengths (to the first rock they hit)
 // are worked out on the CPU each frame; this only draws them.
 struct Laser {
   origin: vec3f, count: f32,
-  aim: vec3f, sheet: f32,
+  aim: vec3f, sheet: f32,          // 0..1: plane of light between the beams; > 1: a scanning laser's plane, 1 + its brightness
   right: vec3f, halfSpread: f32,   // radians
   normal: vec3f, intensity: f32,   // normal of the fan's plane
   color: vec3f, width: f32,        // width: beam thickness in scene units (thins with distance)
@@ -197,8 +197,8 @@ struct Laser {
 };
 struct Lasers {
   count: u32, pad0: u32, pad1: u32, pad2: u32,
-  l: array<Laser, 4>,
-  beams: array<vec4f, 192>,        // (laser * 24 + beam) * 2: [origin, length], [direction, curtain half-angle or -1 = ground rig]
+  l: array<Laser, 16>,
+  beams: array<vec4f, 768>,        // (laser * 24 + beam) * 2: [origin, length], [direction, curtain half-angle or -1 = ground rig]
 };
 @group(0) @binding(8) var<storage, read> lasers: Lasers;
 
@@ -315,7 +315,8 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       // Level set so the core lands near full white and the glow stays below it: if both clipped to
       // white they'd merge into one soft band.
       // Beams in the air don't depend on the depth map, so `reach` doesn't cut them; they only dim with distance.
-      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, 0.12, L.sheet) * distanceFade(t) * seen;
+      // A scanner's lines stay a little more visible: they're what makes a scanned plane read as scanned.
+      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.3, L.sheet > 1.0), min(L.sheet, 1.0)) * distanceFade(t) * seen;
       // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
       if (db.w < 0.0) {
         let to = dot(o - cam, v);
@@ -348,8 +349,18 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         let rel = cam + tp * v - L.origin;
         let a = atan2(dot(rel, L.right), dot(rel, L.aim));
         if (abs(a) <= L.halfSpread && length(rel) < fanLength(li, n, a, L.halfSpread)) {
-          // Faint: light scattered by haze. The contour lines and edges carry the shape.
-          g += L.sheet * 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp) * reachFade(tp, L.reach);
+          let through = min(6.0, 1.0 / max(abs(vn), 0.03));  // longer path through the plane seen edge-on
+          if (L.sheet > 1.0) {
+            // A scanning laser's plane: the beam sweeps across it, dwelling longest where it turns round, so the
+            // edges are brightest (1 / sqrt(1 - x^2), the time a swing spends at each angle). Same falloff with
+            // distance as the beams.
+            let e = abs(a) / max(L.halfSpread, 1e-4);
+            let dwell = 0.5 + 0.5 * min(4.0, inverseSqrt(max(1.0 - e * e, 1e-3)));
+            g += (L.sheet - 1.0) * 0.06 * dwell * through * distanceFade(tp);
+          } else {
+            // Faint: light scattered by haze. The contour lines and edges carry the shape.
+            g += L.sheet * 0.012 * through * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp) * reachFade(tp, L.reach);
+          }
         }
       }
       // Contour line where the plane cuts the rock it reaches.
@@ -359,7 +370,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         if (abs(a) <= L.halfSpread && length(rel) <= fanLength(li, n, a, L.halfSpread) * 1.03 + 0.02) {
           let off = dot(rel, L.normal);
           let thick = 0.0025 * distance(p, cam) + 0.002;
-          r += L.sheet * L.hit * (2.5 * exp(-pow(off / thick, 2.0)) + 0.3 * exp(-pow(off / (thick * 8.0), 2.0)));
+          r += min(L.sheet, 2.0) * L.hit * (2.5 * exp(-pow(off / thick, 2.0)) + 0.3 * exp(-pow(off / (thick * 8.0), 2.0)));
         }
       }
     }

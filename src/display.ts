@@ -245,7 +245,8 @@ async function main() {
 
   const UNIFORM_FLOATS = 72;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
-  const LASER_FLOATS = 4 + 4 * 24 + 192 * 4;
+  const LASER_FIXTURES = 16; // matches `Lasers` in scene.wgsl: scanning rigs take one fixture each
+  const LASER_FLOATS = 4 + LASER_FIXTURES * 24 + LASER_FIXTURES * 24 * 2 * 4;
   const laserData = new Float32Array(LASER_FLOATS);
   const laserCount = new Uint32Array(laserData.buffer, 0, 1);
   const laserBuf = device.createBuffer({ size: LASER_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -1185,21 +1186,55 @@ async function main() {
   // firing a beam in a seeded random direction that changes per trigger step and drifts in between.
   // Aims that run into the rock right away are re-rolled. A negative sheet field marks the beam's
   // start as a visible rig for the shader.
+  // A hand-placed rig's beam: a random direction inside its cone (even over its area), new each step, swaying a
+  // little while lit. While placing rigs it points straight down the cone's axis.
+  const rigBeam = (S: NonNullable<RenderOut["skyLasers"]>[number], q: number[], bi: number, step: number) => {
+    const { o, d: aim } = rigAim(q);
+    if (placing === "rigs") return { o, d: aim };
+    const r = seeded(S.seed * 104729 + step * 131 + bi * 17);
+    const phase = 2 * Math.PI * (S.driftSpeed * S.t) + bi * 1.7;
+    const half = (q[4] / 2) * rad;
+    const th = clamp(half * Math.sqrt(r()) + S.drift * rad * 0.5 * Math.sin(phase), 0, half);
+    const ph = 2 * Math.PI * r() + 0.3 * Math.sin(phase * 0.7 + 1.1);
+    const [e1, e2] = coneBasis(aim);
+    return { o, d: normalize(aim.map((x, j) => x * Math.cos(th) + (e1[j] * Math.cos(ph) + e2[j] * Math.sin(ph)) * Math.sin(th)) as Vec3) };
+  };
+  // Scanning rigs: each beam becomes a scanner sweeping fast across a fan, read by the eye as a triangular plane of
+  // light. One fixture per rig (its own plane): scanLines beams across the fan carry the beam look and give the
+  // plane its length at each angle (cut where it meets rock). The plane's tilt around the beam is seeded per step.
+  // Flicker: each frame the plane dims a little at random and the scan lines shift, so they shimmer.
+  const scanRigs = (S: NonNullable<RenderOut["skyLasers"]>[number], first: number, step: number, brightness: number, maxLen: number) => {
+    let li = first;
+    for (const [bi, q] of (S.rigs ?? []).entries()) {
+      if (li >= LASER_FIXTURES) break;
+      const { o, d } = rigBeam(S, q, bi, step);
+      const r = seeded(S.seed * 7907 + step * 53 + bi * 29);
+      const roll = Math.PI * r();
+      let right = normalize(cross([0, 1, 0], d));
+      if (!Number.isFinite(right[0])) right = [1, 0, 0];
+      const up = cross(d, right);
+      right = normalize(right.map((x, j) => x * Math.cos(roll) + up[j] * Math.sin(roll)) as Vec3);
+      const normal = normalize(cross(d, right));
+      const half = (S.scanSpread / 2) * rad;
+      const n = S.scanLines;
+      const flick = 1 - S.flicker * Math.random();
+      // sheet > 1 marks a scanned plane for the shader: 1 + the plane's brightness.
+      laserData.set([...o, n, ...d, 1 + S.scanBright, ...right, half, ...normal, brightness * flick, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
+      const shift = (Math.random() - 0.5) * S.flicker;
+      for (let k = 0; k < n; k++) {
+        const a = -half + (2 * half * clamp(k + (k > 0 && k < n - 1 ? shift : 0), 0, n - 1)) / (n - 1);
+        const dk = normalize(d.map((x, j) => x * Math.cos(a) + right[j] * Math.sin(a)) as Vec3);
+        // The middle line also marks the rig itself (a small bright source).
+        laserData.set([...o, beamLength(o, dk, maxLen), ...dk, k === n >> 1 ? -1 : 0], beamSlot(li, k));
+      }
+      li++;
+    }
+    return li;
+  };
   const groundRigs = (S: NonNullable<RenderOut["skyLasers"]>[number], li: number, step: number, maxLen: number) => {
     if (S.rigs?.length) {
       S.rigs.slice(0, 24).forEach((q, bi) => {
-        const { o, d: aim } = rigAim(q);
-        let d = aim;
-        if (placing !== "rigs") {
-          // A random direction inside the cone (even over its area), new each step, swaying a little while lit.
-          const r = seeded(S.seed * 104729 + step * 131 + bi * 17);
-          const phase = 2 * Math.PI * (S.driftSpeed * S.t) + bi * 1.7;
-          const half = (q[4] / 2) * rad;
-          const th = clamp(half * Math.sqrt(r()) + S.drift * rad * 0.5 * Math.sin(phase), 0, half);
-          const ph = 2 * Math.PI * r() + 0.3 * Math.sin(phase * 0.7 + 1.1);
-          const [e1, e2] = coneBasis(aim);
-          d = normalize(aim.map((x, j) => x * Math.cos(th) + (e1[j] * Math.cos(ph) + e2[j] * Math.sin(ph)) * Math.sin(th)) as Vec3);
-        }
+        const { o, d } = rigBeam(S, q, bi, step);
         laserData.set([...o, beamLength(o, d, maxLen), ...d, -1], beamSlot(li, bi));
       });
       return;
@@ -1235,10 +1270,10 @@ async function main() {
       laserData.set([...o, len, ...d, -1], beamSlot(li, bi));
     }
   };
-  const beamSlot = (li: number, bi: number) => 4 + 4 * 24 + (li * 24 + bi) * 8;
+  const beamSlot = (li: number, bi: number) => 4 + LASER_FIXTURES * 24 + (li * 24 + bi) * 8;
   const writeLasers = (list: NonNullable<RenderOut["lasers"]>, sky: NonNullable<RenderOut["skyLasers"]>) => {
     laserData.fill(0);
-    const n = Math.min(4, list.length);
+    const n = Math.min(LASER_FIXTURES, list.length);
     const maxLen = info.far * 1.5;
     for (let li = 0; li < n; li++) {
       const L = list[li];
@@ -1269,10 +1304,14 @@ async function main() {
     for (const S of sky) {
       const showRigs = placing === "rigs" && S.from === 1;
       if (S.intensity <= 0 && !showRigs) continue; // switched off (its setup is out)
-      if (used >= 4) break;
-      const li = used++;
+      if (used >= LASER_FIXTURES) break;
       const step = Math.floor(S.trigger);
       const brightness = showRigs ? Math.max(1, S.intensity) : S.intensity * Math.exp(-(S.trigger - step) * S.fade);
+      if (S.from === 1 && S.rigs?.length && S.scan > 0.5 && !showRigs) {
+        used = scanRigs(S, used, step, brightness, maxLen);
+        continue;
+      }
+      const li = used++;
       const height = info.far * 0.6;
       const count = S.from === 1 && S.rigs?.length ? Math.min(24, S.rigs.length) : S.count;
       laserData.set([0, 0, 0, count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
