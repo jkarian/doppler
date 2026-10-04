@@ -41,4 +41,7 @@ pip install -q --no-build-isolation ./code/pano_init/utils3d
 python -c "import utils3d.torch as u; assert hasattr(u, 'image_uv'), 'utils3d too new'"
 # OpenCV 5's wheels can't write .exr (the panorama depth step does); MoGe v1 was written against 4.10.
 pip install -q "opencv-python==4.10.0.84" "opencv-python-headless==4.10.0.84" "numpy<2"
+# The reconstruction's super-resolution step imports tensorboard (needs protobuf 6+); the upstream list pins protobuf
+# 3.20 for streamlit, which this pipeline doesn't use.
+pip install -q protobuf==6.31.1
 python -c "import torch, diffsynth, nvdiffrast.torch, simple_knn; print('matrix-3d env ok', torch.__version__, torch.cuda.is_available())"
