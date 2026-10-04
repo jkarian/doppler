@@ -146,6 +146,18 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      out). The user is now researching how 3D-world systems (Marble, HunyuanWorld/Voyager, Lyra...) do it:
      their key trick seems to be memory (render the 3D so far, dream only the holes, add, repeat).
    - Models live in C:\AI_Models (Hugging Face cache in C:\AI_Models\huggingface; Wan 2.2 already there).
+   - **Tripo model -> scene (works best so far for the spire):** the user's Tripo mesh (3d/tripo/model.obj) ->
+     `align_mesh.py` (finds the photo's camera on the mesh, bakes front + behind layers) -> `make_splat_scene.py
+     scenes/canyon scenes/canyon-tripo --bake scenes/canyon/world/tripo --flow-align --parts` (optical flow onto
+     the photo, then each freestanding part of parts.json snapped onto its outline by template matching).
+     Spire and left mesa snap; fin and tree too uncertain. User's idea for later: camera-project the photo onto
+     the mesh, bake into its UV texture, repair stretched texels (a real textured mesh: archetype 3 renderer).
+   - **Matrix-3D (parked, run last):** environment built (`setup_matrix3d.sh`, venv-matrix), models in
+     C:\AI_Models\matrix3d, panorama done (scenes/canyon/world/matrix/pano_img.jpg). The video step is killed for
+     out of memory (24 GB WSL RAM, 8 GB swap). Plan agreed with the user: after a PC restart, with nothing else
+     running, `wsl -d Ubuntu-24.04 -- bash /mnt/d/Projects/doppler-canyon/tools/world/matrix3d_scene.sh
+     scenes/canyon unused` (resumes at the video step). If still killed, more swap in C:\Users\johnk\.wslconfig
+     (ask first). Caveat: the panorama gives the canyon beyond the opening only ~100 px of 1600.
 3. Patterns. Structure: Scene -> Arrangement (when: which pattern on which setup in which song part) ->
    Pattern x Setup (how x what; patterns reusable across setups) -> Objects -> Elements -> Nodes -> Code.
    Foundation: a shared Houdini-style point/attribute model (every element has position, colour, brightness,
