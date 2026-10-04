@@ -774,7 +774,8 @@ const defs: NodeDef[] = [
       { name: "intensity", default: 1, min: 0, step: 0.05 },
       { name: "hit", default: 1.5, min: 0, step: 0.05 },
       { name: "scan", default: 0, min: 0, max: 1, step: 1, doc: "ground rigs: 1 turns each beam into a scanning laser, a triangular plane of light like a club laser (wire a Setup node's level here to switch with the song)" },
-      { name: "scanSpread", default: 30, min: 2, max: 120, step: 1, doc: "degrees across each scanning plane" },
+      { name: "scanSpread", default: 1.5, min: 0.2, max: 120, step: 0.1, doc: "degrees across each scanning plane at rest (small: it reads as a line)" },
+      { name: "scanSpreadPeak", default: 40, min: 0.2, max: 120, step: 0.5, doc: "degrees across each plane at a full peak (wire a Peaks node's peak into peak)" },
       { name: "scanLines", default: 12, min: 2, max: 24, step: 1, doc: "scan lines drawn across each plane" },
       { name: "scanBright", default: 1, min: 0, max: 10, step: 0.05, doc: "brightness of the plane of light" },
       { name: "flicker", default: 0.3, min: 0, max: 1, step: 0.05, doc: "how much the scanners flicker" },
@@ -803,7 +804,10 @@ const defs: NodeDef[] = [
         drift: Math.max(0, num(i.drift)), driftSpeed: Math.max(0, num(i.driftSpeed)), t: ctx.t,
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
         width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity, hit: Math.max(0, num(i.hit)),
-        scan: clamp(num(i.scan), 0, 1), scanSpread: clamp(num(i.scanSpread), 2, 120), scanLines: Math.round(clamp(num(i.scanLines), 2, 24)),
+        // The planes open with the peaks: lines at rest, scanSpreadPeak wide at a full peak, closing as it decays.
+        scan: clamp(num(i.scan), 0, 1),
+        scanSpread: clamp(num(i.scanSpread) + (num(i.scanSpreadPeak) - num(i.scanSpread)) * clamp(num(i.peak), 0, 1), 0.2, 120),
+        scanLines: Math.round(clamp(num(i.scanLines), 2, 24)),
         scanBright: Math.max(0, num(i.scanBright)), flicker: clamp(num(i.flicker), 0, 1),
         // Speed changes are integrated (push is the peaks added up over time), so a faster swing never jumps.
         sweep: Math.max(0, num(i.sweep)), sweepPhase: Math.max(0, num(i.sweepSpeed)) * ctx.t + Math.max(0, num(i.peakFaster)) * num(i.peakPush),

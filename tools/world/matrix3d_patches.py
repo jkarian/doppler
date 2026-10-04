@@ -3,6 +3,7 @@
 - Photo -> panorama: FLUX.1-Fill-dev's transformer in bf16 is 24 GB. Whole-model offload overflowed the card into
   shared system memory; sequential offload re-read it from C: every step (it doesn't fit Linux's page cache).
   Store its weights in fp8 (12 GB, computed in bf16) so it sits on the card. (bitsandbytes 8-bit hit a diffusers bug.)
+- Panoramic video (5B): load the video model straight onto the card instead of staging everything in system RAM.
 """
 
 from pathlib import Path
@@ -31,3 +32,16 @@ for old in ("pipe.enable_model_cpu_offload(gpu_id=gpu_id ) # Save VRAM",
 src = src.replace(fill, patched)
 f.write_text(src)
 print("fp8 storage" if "enable_layerwise_casting" in src else "WARNING: offload line not found", f)
+
+# Panoramic video (5B): every model was staged in system RAM first (T5 10.6 GB + the video model's 20 GB of files +
+# VAE), which the out-of-memory killer stopped at 24 GB. The video model fits the card: load it straight there.
+f = ROOT / "panoramic_image_to_video.py"
+src = f.read_text()
+old = 'model_id="Wan-AI/Wan2.2-TI2V-5B", origin_file_pattern="diffusion_pytorch_model*.safetensors", offload_device="cpu")'
+if old in src:
+    f.write_text(src.replace(old, old.replace('offload_device="cpu"', "offload_device=None")))
+    print("video model straight to the card", f)
+elif 'diffusion_pytorch_model*.safetensors", offload_device=None' in src:
+    print("already patched", f)
+else:
+    raise SystemExit(f"unexpected contents in {f}: update matrix3d_patches.py")

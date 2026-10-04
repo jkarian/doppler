@@ -661,8 +661,9 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   let sky = z >= u.far * u.skyCut;
 
   let hit = lightAt(p);
-  // Slight wrap so rough AI-derived normals don't go hard black at the terminator.
-  let ndl = clamp((dot(n, hit.l) + 0.15) / 1.15, 0.0, 1.0);
+  // Slight wrap so rough AI-derived normals don't go hard black at the terminator, except for the sun: a real sun
+  // leaves faces turned away dark, and at high gain the wrap washed everything into general brightness.
+  let ndl = select(clamp((dot(n, hit.l) + 0.15) / 1.15, 0.0, 1.0), clamp(dot(n, hit.l), 0.0, 1.0), u.sun > 0.5);
   var vis = select(visUp(shadowTex, uv, z), vec4f(1.0), u.shadows < 0.5);
   var vis2 = select(visUp(shadowTex2, uv, z), vec4f(1.0), u.shadows < 0.5);
   let shadow = vis.r;
