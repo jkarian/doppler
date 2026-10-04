@@ -1,6 +1,6 @@
 # Doppler Canyon: status and handoff
 
-Last updated 2026-10-03 (evening). Read this first when picking the project back up.
+Last updated 2026-10-04 (afternoon): three-layer matte-painted vista works (scenes/canyon-vista). Read this first when picking the project back up.
 
 ## What it is
 
@@ -187,6 +187,19 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      the photo's real canyon through the opening and paint only what's hidden/beyond the frame, or (b) repaint all
      beyond the pillars as the vast open vista. Then build the scene from canyon-layers (true scale) and retune the
      graph for metres (nook radii, near threshold, GapHorizon read -43 there).
+   - **Matte-painted vista, three layers (2026-10-04, works; user: "def an improvement"):** the user painted
+     images/canyon_midground.png (real canyon through the opening kept, the rest repainted as an open vista) and
+     images/canyon_middle.png (pillar + spire cut out, with what the cave walls hide of them painted, RGBA).
+     `tools/vista_plate.py scenes/canyon-layers images/canyon_midground.png scenes/canyon-vista --middle
+     images/canyon_middle.png` -> scenes/canyon-vista: main = photo (cave), then middle layer, then vista plate.
+     Depth on each plate on its own (MoGe-2), mapped onto the markup distances: fixes the far gorge flattening at the
+     river bend (the scan now recedes along it). The renderer takes a list of layers behind the main one.
+     View: `?scene=canyon-vista&graph=vista-test&cam=sweep` (vista-test: MRI scan always on, over 100 m-3 km;
+     `cam=sweep` / `cam=x,y` move or hold the camera for parallax checks). Open items: lighting still tuned for the
+     old squashed scale (overexposed at drops: nook radii, near threshold, GapHorizon); a few orange specks on the
+     left pillar's edge at 2x sway; the dark nook at the left mesa's base is in the painting; mountains map to ~13 km
+     (markup says 20-30). User's idea, agreed direction: a general camera-mapping tool (split into layers, find
+     where each needs "back information", inpaint it, depth per layer) = the one-command image-to-scene goal.
    - **Matrix-3D (parked, run last):** environment built (`setup_matrix3d.sh`, venv-matrix), models in
      C:\AI_Models\matrix3d, panorama done (scenes/canyon/world/matrix/pano_img.jpg). The video step is killed for
      out of memory (24 GB WSL RAM, 8 GB swap). Plan agreed with the user: after a PC restart, with nothing else
