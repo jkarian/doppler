@@ -42,6 +42,7 @@ struct Uniforms {
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
   sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth, cave rock solid depth (fractions of distance)
   up: vec4f,           // true vertical in scene space (the photo's camera looks down a little), background layer present (1/0)
+  sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), -, -, -
 };
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
@@ -675,7 +676,14 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   let hit = lightAt(p);
   // Slight wrap so rough AI-derived normals don't go hard black at the terminator, except for the sun: a real sun
   // leaves faces turned away dark, and at high gain the wrap washed everything into general brightness.
-  let ndl = select(clamp((dot(n, hit.l) + 0.15) / 1.15, 0.0, 1.0), clamp(dot(n, hit.l), 0.0, 1.0), u.sun > 0.5);
+  var ndl = select(clamp((dot(n, hit.l) + 0.15) / 1.15, 0.0, 1.0), clamp(dot(n, hit.l), 0.0, 1.0), u.sun > 0.5);
+  // Hard terminator: our normals come from a depth estimate and are smooth, so light fades gradually across a face and
+  // reads as a wash. Real rock has crisp ledge lips: faces toward the sun are lit solid, and the turn into shade is
+  // narrow. Hardness narrows that turn (lit faces go full, the falloff squeezes into a thin band near grazing).
+  if (u.sun > 0.5 && u.sunC.x > 0.0) {
+    let k = u.sunC.x;
+    ndl = mix(ndl, smoothstep(0.02, mix(0.6, 0.12, k), ndl), k);
+  }
   var vis = select(visUp(shadowTex, uv, z), vec4f(1.0), u.shadows < 0.5);
   var vis2 = select(visUp(shadowTex2, uv, z), vec4f(1.0), u.shadows < 0.5);
   let shadow = vis.r;

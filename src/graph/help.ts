@@ -22,6 +22,7 @@ const HELP: Record<string, string> = {
 
   // Sun
   "Sun.gain": "Overall sun brightness: multiplies whatever drives it. Raise it to make the sun stand out from the other lights (the brightness cap can limit how far it shows).",
+  "Sun.terminator": "How sharply sunlit rock turns to shade. 0 = soft, gradual falloff (reads as a wash). 1 = hard: faces toward the sun lit solid, crisp light on ledge lips, like low sun on real rock.",
   "Sun.detailBump": "Fine relief of the rock: cracks, grain and small layers, taken from the photo's texture, so a low sun picks them out. Affects every light. 0 = off.",
   "Sun.floorLight": "How much sun falls on the floor: flat ground lower than floorBelow (canyon floor, river) and the cave floor around us. 0 = none; 1 = lit like everything else. Plateau tops and high ledges always get sun.",
   "Sun.bounce": "Warm light bounced off sunlit rock and the bright sky into the faces turned away from the sun, which otherwise stay dark when we look toward the sun. Grows as the sun climbs. 0 = none.",

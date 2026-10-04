@@ -227,7 +227,7 @@
     "maxArc": 3,
     "floorLight": 0,
     "gain": 10,
-    "bounce": 0.35,
+    "bounce": 0.25,
     "shadowDepth": 0.5,
     "shadowSoftness": 0.05,
     "caveDepth": 0.5,
@@ -765,7 +765,7 @@
    "type": "SunTint",
    "name": "Sun colour by height",
    "params": {
-    "warmth": 0.3
+    "warmth": 0.7
    },
    "pos": [
     620,

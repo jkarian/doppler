@@ -122,7 +122,7 @@ export interface RenderOut {
   scan?: ScanOut;
   lasers?: LaserOut[];
   skyLasers?: SkyLaserOut[];
-  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number; floor: number; floorBelow: number; bounce: number; shadowSoftness: number; shadowDepth: number; caveDepth: number; detailBump: number };
+  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number; floor: number; floorBelow: number; bounce: number; shadowSoftness: number; shadowDepth: number; caveDepth: number; detailBump: number; terminator: number };
   camera?: { swayX: number; swayY: number; pushZ: number };
   tone?: { baseDim: number; baked: number; cap: number };
 }
@@ -672,6 +672,7 @@ const defs: NodeDef[] = [
       { name: "caveDepth", default: 15, min: 0.5, max: 50, step: 0.5, doc: "how deep the rock behind the cave walls around us counts as solid when casting sun shadows, as a multiple of its distance" },
       { name: "shadowDepth", default: 0.6, min: 0.05, max: 2, step: 0.05, doc: "how deep far ridges count as solid rock when casting shadows, as a fraction of their distance" },
       { name: "floorBelow", default: -4300, min: -20000, max: 5000, step: 50, doc: "real height in feet relative to the camera: flat ground lower than this counts as floor (plateau tops above it still get sun)" },
+      { name: "terminator", default: 0.7, min: 0, max: 1, step: 0.05, doc: "how sharply sunlit rock turns to shade: 0 soft, 1 hard (faces toward the sun lit solid, crisp lips on ledges)" },
       { name: "detailBump", default: 3, min: 0, max: 20, step: 0.1, doc: "fine relief of the rock (cracks, grain) from the photo's texture, picked out by low light; affects all lights" },
       { name: "maxArc", default: 180, min: 0, max: 180, step: 0.5, doc: "degrees: the sun never goes higher (low enough, it lights only the walls). It eases into this ceiling over the last 6 degrees instead of stopping dead." },
       { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
@@ -681,7 +682,7 @@ const defs: NodeDef[] = [
       const k = clamp(num(i.level), 0, 1);
       ctx.out.sun = {
         on: num(i.enabled) > 0.5 && k > 0.001, arc: softCeiling(num(i.arc), num(i.maxArc), 6), azimuth: num(i.azimuth),
-        intensity: Math.max(0, num(i.intensity)) * Math.max(0, num(i.gain)) * k, floor: clamp(num(i.floorLight), 0, 1), floorBelow: num(i.floorBelow), bounce: Math.max(0, num(i.bounce)), shadowSoftness: clamp(num(i.shadowSoftness), 0, 1), shadowDepth: Math.max(0.01, num(i.shadowDepth)), caveDepth: Math.max(0.1, num(i.caveDepth)), detailBump: Math.max(0, num(i.detailBump)),
+        intensity: Math.max(0, num(i.intensity)) * Math.max(0, num(i.gain)) * k, floor: clamp(num(i.floorLight), 0, 1), floorBelow: num(i.floorBelow), bounce: Math.max(0, num(i.bounce)), shadowSoftness: clamp(num(i.shadowSoftness), 0, 1), shadowDepth: Math.max(0.01, num(i.shadowDepth)), caveDepth: Math.max(0.1, num(i.caveDepth)), detailBump: Math.max(0, num(i.detailBump)), terminator: clamp(num(i.terminator), 0, 1),
         color: vec(i.color), rays: Math.max(0, num(i.rays)) * k, flare: Math.max(0, num(i.flare)) * k, skyBoost: num(i.skyBoost) * k,
       };
       return {};
