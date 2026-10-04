@@ -1200,9 +1200,9 @@ async function main() {
     return { o, d: normalize(aim.map((x, j) => x * Math.cos(th) + (e1[j] * Math.cos(ph) + e2[j] * Math.sin(ph)) * Math.sin(th)) as Vec3) };
   };
   // Scanning rigs: each beam becomes a scanner sweeping fast across a fan, read by the eye as a triangular plane of
-  // light. One fixture per rig (its own plane): scanLines beams across the fan carry the beam look and give the
-  // plane its length at each angle (cut where it meets rock). The plane's tilt around the beam is seeded per step.
-  // Flicker: each frame the plane dims a little at random and the scan lines shift, so they shimmer.
+  // light. One fixture per rig (its own plane): scanLines beams across the fan give the plane its length at each
+  // angle (cut where it meets rock); only the two edge ones are drawn as lines. The plane's tilt around the beam is
+  // seeded per step. Flicker: each frame the plane dims a little at random.
   const scanRigs = (S: NonNullable<RenderOut["skyLasers"]>[number], first: number, step: number, brightness: number, maxLen: number) => {
     let li = first;
     for (const [bi, q] of (S.rigs ?? []).entries()) {
@@ -1220,9 +1220,8 @@ async function main() {
       const flick = 1 - S.flicker * Math.random();
       // sheet > 1 marks a scanned plane for the shader: 1 + the plane's brightness.
       laserData.set([...o, n, ...d, 1 + S.scanBright, ...right, half, ...normal, brightness * flick, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
-      const shift = (Math.random() - 0.5) * S.flicker;
       for (let k = 0; k < n; k++) {
-        const a = -half + (2 * half * clamp(k + (k > 0 && k < n - 1 ? shift : 0), 0, n - 1)) / (n - 1);
+        const a = -half + (2 * half * k) / (n - 1);
         const dk = normalize(d.map((x, j) => x * Math.cos(a) + right[j] * Math.sin(a)) as Vec3);
         // The middle line also marks the rig itself (a small bright source).
         laserData.set([...o, beamLength(o, dk, maxLen), ...dk, k === n >> 1 ? -1 : 0], beamSlot(li, k));

@@ -315,8 +315,12 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       // Level set so the core lands near full white and the glow stays below it: if both clipped to
       // white they'd merge into one soft band.
       // Beams in the air don't depend on the depth map, so `reach` doesn't cut them; they only dim with distance.
-      // A scanner's lines stay a little more visible: they're what makes a scanned plane read as scanned.
-      g += 6.0 * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.3, L.sheet > 1.0), min(L.sheet, 1.0)) * distanceFade(t) * seen;
+      // A scanning laser's plane shows only its two edge lines; the beams inside only shape the plane (where rock
+      // cuts it off) and aren't drawn.
+      let scanned = L.sheet > 1.0;
+      let edgeLine = bi == 0u || bi + 1u == n;
+      let drawn = !scanned || edgeLine;
+      g += select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen;
       // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
       if (db.w < 0.0) {
         let to = dot(o - cam, v);
@@ -326,7 +330,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         }
       }
       // Hot spot where the beam lands on the rock.
-      if (b.w < L.maxLen * 0.999) {
+      if (drawn && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
         // Additive: a glowing point where the beam strikes, with the beam's profile...
         let te = dot(end - cam, v);

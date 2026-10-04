@@ -96,7 +96,7 @@ const HELP: Record<string, string> = {
   "SkyLaser.fade": "How fast beams dim between re-aims (0 = steady).",
   "SkyLaser.scan": "1 turns each rig's beam into a scanning laser: a flickering triangular plane of light, like club lasers. Wire a Setup node's level here to switch it with the song.",
   "SkyLaser.scanSpread": "How wide each plane of light opens, degrees.",
-  "SkyLaser.scanLines": "How many scan lines show across each plane.",
+  "SkyLaser.scanLines": "How finely each plane follows the rock that cuts it off (only its two edge lines are drawn).",
   "SkyLaser.scanBright": "Brightness of the plane itself (the lines and the marks on the rock follow intensity).",
   "SkyLaser.flicker": "How much the scanners flicker and their lines shimmer.",
   "Laser.originU": "Where the fixture sits, left-right (0-1 across the picture).",
