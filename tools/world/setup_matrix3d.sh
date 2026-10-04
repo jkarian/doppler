@@ -6,6 +6,9 @@
 set -e
 export PATH=/usr/local/cuda-12.8/bin:$PATH CUDA_HOME=/usr/local/cuda-12.8 TORCH_CUDA_ARCH_LIST=8.9 MAX_JOBS=6
 export HF_HOME=/mnt/c/AI_Models/huggingface
+# Several of the 3DGS rasterizers use uint32_t / FLT_MAX without including their headers (fails on GCC 13):
+# include them for every CUDA and C++ compile instead of patching each fresh clone.
+export NVCC_PREPEND_FLAGS="-include cstdint -include cfloat" CXXFLAGS="-include cstdint -include cfloat"
 cd /opt/world
 /opt/world/venv/bin/pip install -q uv
 [ -d venv-matrix ] || /opt/world/venv/bin/uv venv -q --python 3.10 venv-matrix
@@ -13,6 +16,8 @@ cd /opt/world
 /opt/world/venv/bin/uv pip install -q pip "setuptools<70" wheel ninja packaging
 pip install -q torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
 cd Matrix-3D
+# simple-knn uses FLT_MAX without including <cfloat> (fails on newer compilers).
+grep -q '<cfloat>' submodules/simple-knn/simple_knn.cu || sed -i '1i #include <cfloat>' submodules/simple-knn/simple_knn.cu
 # The upstream script expects a conda env; run it with this venv's pip, answering yes to the uninstall,
 # and without build isolation so the CUDA extensions see torch.
 sed -e 's/^pip uninstall basicsr/pip uninstall -y basicsr/' \
@@ -20,6 +25,13 @@ sed -e 's/^pip uninstall basicsr/pip uninstall -y basicsr/' \
     -e 's#^pip install git+https://github.com/rmurai0610#pip install --no-build-isolation git+https://github.com/rmurai0610#' \
     -e 's#^pip install submodules/odgs#pip install --no-build-isolation submodules/odgs#' \
     -e 's#^pip install "git+https://github.com/facebookresearch/pytorch3d#pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d#' \
+    -e 's/^pip install -e \.$/pip install --no-build-isolation -e ./' \
     install.sh > /tmp/install_matrix3d.sh
+# DiffSynth's setup.py needs pkg_resources (old setuptools): no build isolation above, our setuptools<70.
+# On a rerun, skip the CUDA extensions that already built.
+if python -c "import nvdiffrast.torch, simple_knn, diff_gaussian_rasterization, odgs_gaussian_rasterization" 2>/dev/null; then
+  sed -n '/^cd code/,$p' /tmp/install_matrix3d.sh > /tmp/install_matrix3d_rest.sh
+  mv /tmp/install_matrix3d_rest.sh /tmp/install_matrix3d.sh
+fi
 bash -e /tmp/install_matrix3d.sh
 python -c "import torch, diffsynth, nvdiffrast.torch, simple_knn; print('matrix-3d env ok', torch.__version__, torch.cuda.is_available())"
