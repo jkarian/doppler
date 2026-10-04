@@ -156,6 +156,19 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      cm, 1400 ft per Tripo unit, no groups) is the one the user works in. Levelling to our 23-degree pitch made the
      spires lean back: the user judged Tripo's near-level camera (-2.4 deg) right. Our scene's pitch (scene.json "up")
      may be too steep (earlier estimates ranged 5-23 degrees); revisit, as it sets the sun's and rigs' real angles.
+   - **Layer markup (2026-10-04):** the user painted the layers (images/markup_layers.webp: frame, pillars+spire, near
+     canyon, far canyon, mountains) with distances (images/markup_distances.webp: 30 m, 0.3 km, 3 km, 30 km, river to
+     plateau 500 m). `tools/layers_from_markup.py` -> `scenes/canyon-layers` (true scale in metres, metersPerUnit 1;
+     display uses it for feet). Renders, but the graph was tuned on the old squashed scale (nook pools 800 ft swamp the
+     3-30 m cave; GapHorizon reads -43): needs a retune before it looks right. images/ is git-ignored (local only).
+   - **Matrix-3D open vista (overnight, works):** fed only the view through the opening (crop with the markup:
+     scenes/canyon/world/matrix_vista/vista_input.jpg) so the panorama opens up instead of rebuilding the cave.
+     Results in scenes/canyon/world/matrix_vista/: pano_img.jpg (a wide-open cliff-top canyon), pano_video.mp4
+     (81 frames, 1440x720), generated_3dgs_opt.ply (694 MB splat), snapshots/ (6 views from the centre; view with
+     `bash tools/world/run.sh tools/world/view_splat.py scenes/canyon/world/matrix_vista/generated_3dgs_opt.ply` on
+     :8080). Soft: its StableSR step fails (`No module named 'taming'`), so it trained on un-upscaled views. Fixes made
+     on the way: swap 32 GB (C:\Users\johnk\.wslconfig), protobuf 6.31.1, StableSR checkpoints.
+     Next idea: our near layers (cave, pillars, spire from the photo + markup) in front of this splat as the vista.
    - **Matrix-3D (parked, run last):** environment built (`setup_matrix3d.sh`, venv-matrix), models in
      C:\AI_Models\matrix3d, panorama done (scenes/canyon/world/matrix/pano_img.jpg). The video step is killed for
      out of memory (24 GB WSL RAM, 8 GB swap). Plan agreed with the user: after a PC restart, with nothing else
