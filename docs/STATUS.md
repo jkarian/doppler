@@ -169,6 +169,11 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      :8080). Soft: its StableSR step fails (`No module named 'taming'`), so it trained on un-upscaled views. Fixes made
      on the way: swap 32 GB (C:\Users\johnk\.wslconfig), protobuf 6.31.1, StableSR checkpoints.
      Next idea: our near layers (cave, pillars, spire from the photo + markup) in front of this splat as the vista.
+   - **Sharper vista (2026-10-04):** `tools/world/matrix3d_hires.sh scenes/canyon/world/matrix_vista` -> SeedVR2 2x of
+     the panoramic video (2880x1440, one clip), Matrix-3D's 3D step at that size (`matrix3d_recon.py`: no StableSR,
+     15,000 iterations, densify only to 1,501 or the Gaussians fill the card) -> scenes/canyon/world/matrix_vista_hr/
+     generated_3dgs_opt.ply (728 MB). Clearly sharper (peaks, cliff edges, rock texture), not photo-sharp up close.
+     Training ~18 min; the depth step ~25 min (writes big per-keyframe meshes to D:).
    - **Matrix-3D (parked, run last):** environment built (`setup_matrix3d.sh`, venv-matrix), models in
      C:\AI_Models\matrix3d, panorama done (scenes/canyon/world/matrix/pano_img.jpg). The video step is killed for
      out of memory (24 GB WSL RAM, 8 GB swap). Plan agreed with the user: after a PC restart, with nothing else
