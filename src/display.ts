@@ -1207,13 +1207,19 @@ async function main() {
     let li = first;
     for (const [bi, q] of (S.rigs ?? []).entries()) {
       if (li >= LASER_FIXTURES) break;
-      const { o, d } = rigBeam(S, q, bi, step);
+      const beam = rigBeam(S, q, bi, step);
+      const o = beam.o;
+      let d = beam.d;
       const r = seeded(S.seed * 7907 + step * 53 + bi * 29);
       const roll = Math.PI * r();
       let right = normalize(cross([0, 1, 0], d));
       if (!Number.isFinite(right[0])) right = [1, 0, 0];
       const up = cross(d, right);
       right = normalize(right.map((x, j) => x * Math.cos(roll) + up[j] * Math.sin(roll)) as Vec3);
+      // The plane swings across itself (around its sideways axis), each rig out of step: wider and faster on peaks.
+      const swing = S.sweep * S.sweepBoost * rad * Math.sin(2 * Math.PI * S.sweepPhase + bi * 1.9);
+      const across = normalize(cross(d, right));
+      d = normalize(d.map((x, j) => x * Math.cos(swing) + across[j] * Math.sin(swing)) as Vec3);
       const normal = normalize(cross(d, right));
       const half = (S.scanSpread / 2) * rad;
       const n = S.scanLines;

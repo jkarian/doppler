@@ -804,6 +804,16 @@
     1630,
     1260
    ]
+  },
+  {
+   "id": "songPeaks",
+   "type": "Peaks",
+   "name": "Peaks in the song",
+   "params": {},
+   "pos": [
+    1300,
+    1260
+   ]
   }
  ],
  "wires": [
@@ -1605,6 +1615,26 @@
    "to": [
     "skyBeams",
     "scan"
+   ]
+  },
+  {
+   "from": [
+    "songPeaks",
+    "peak"
+   ],
+   "to": [
+    "skyBeams",
+    "peak"
+   ]
+  },
+  {
+   "from": [
+    "songPeaks",
+    "push"
+   ],
+   "to": [
+    "skyBeams",
+    "peakPush"
    ]
   }
  ]

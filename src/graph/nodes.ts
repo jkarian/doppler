@@ -62,6 +62,9 @@ export interface SkyLaserOut {
   scanLines: number; // scan lines drawn across the plane (they shimmer as the scanner runs)
   scanBright: number; // brightness of the plane itself
   flicker: number; // 0..1: how much the scanners flicker
+  sweep: number; // degrees each scanning plane swings to either side (across its plane)
+  sweepPhase: number; // cycles so far, including the extra speed from peaks
+  sweepBoost: number; // multiplier on sweep from the current peak
 }
 
 export interface LaserOut {
@@ -314,6 +317,59 @@ const defs: NodeDef[] = [
       if (lo === 0) return { count: 0, hit: 0, since: 1e6 };
       const since = ctx.t - hits[lo - 1][0];
       return { count: lo, hit: hits[lo - 1][1] * Math.exp(-since / num(i.decay)), since };
+    },
+  },
+  {
+    type: "Peaks",
+    category: "Music",
+    doc:
+      "Peaks in the song: how far the music's intensity rises above its own recent level (the last `window` seconds), " +
+      "so a hit stands out whether the part is quiet or loud. peak: 0..1 now, rising over attack and falling over release. " +
+      "push: the peaks added up over time (seconds of full peak so far), for things that speed up on peaks without jumping: " +
+      "wire it into a phase, as SkyLaser's peakPush does.",
+    inputs: [
+      { name: "window", default: 3, kind: "const", min: 0.5, max: 20, step: 0.1, doc: "seconds of recent music a peak is measured against" },
+      { name: "threshold", default: 0.03, kind: "const", min: 0, max: 0.5, step: 0.005, doc: "how far above the recent level counts as a peak" },
+      { name: "attack", default: 0.03, kind: "const", min: 0.005, max: 1, step: 0.005, doc: "seconds to rise" },
+      { name: "release", default: 0.6, kind: "const", min: 0.02, max: 5, step: 0.01, doc: "seconds to fall" },
+    ],
+    outputs: ["peak", "push"],
+    init: (c, ctx) => {
+      // Precomputed over the whole track at 100 per second, so the outputs stay pure functions of time.
+      const rate = 100;
+      const m = ctx.music;
+      if (!m) return { rate, peak: new Float32Array(1), push: new Float32Array(1) };
+      const n = Math.ceil(m.a.duration * rate) + 1;
+      const x = new Float32Array(n);
+      for (let k = 0; k < n; k++) x[k] = m.intensity(k / rate);
+      // Recent level: a trailing average over the window (running sum).
+      const w = Math.max(1, Math.round(num(c.window) * rate));
+      const rise = new Float32Array(n);
+      let sum = 0;
+      for (let k = 0; k < n; k++) {
+        sum += x[k] - (k >= w ? x[k - w] : 0);
+        rise[k] = Math.max(0, x[k] - sum / Math.min(k + 1, w) - num(c.threshold));
+      }
+      // Scale so the song's strong peaks reach about 1.
+      const sorted = Array.from(rise).filter((v) => v > 0).sort((a, b) => a - b);
+      const top = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 1;
+      const peak = new Float32Array(n);
+      const push = new Float32Array(n);
+      const up = 1 - Math.exp(-1 / (num(c.attack) * rate));
+      const down = 1 - Math.exp(-1 / (num(c.release) * rate));
+      let e = 0;
+      for (let k = 0; k < n; k++) {
+        const target = Math.min(1, rise[k] / Math.max(top, 1e-4));
+        e += (target - e) * (target > e ? up : down);
+        peak[k] = e;
+        push[k] = (k ? push[k - 1] : 0) + e / rate;
+      }
+      return { rate, peak, push };
+    },
+    eval: (_i, ctx, state) => {
+      const s = state as { rate: number; peak: Float32Array; push: Float32Array };
+      const k = Math.min(s.peak.length - 1, Math.max(0, Math.floor(ctx.t * s.rate)));
+      return { peak: s.peak[k], push: s.push[k] };
     },
   },
   {
@@ -722,6 +778,12 @@ const defs: NodeDef[] = [
       { name: "scanLines", default: 12, min: 2, max: 24, step: 1, doc: "scan lines drawn across each plane" },
       { name: "scanBright", default: 1, min: 0, max: 10, step: 0.05, doc: "brightness of the plane of light" },
       { name: "flicker", default: 0.3, min: 0, max: 1, step: 0.05, doc: "how much the scanners flicker" },
+      { name: "sweep", default: 8, min: 0, max: 60, step: 0.5, doc: "scanning planes: degrees each swings to either side" },
+      { name: "sweepSpeed", default: 0.4, min: 0, max: 8, step: 0.05, doc: "scanning planes: swings per second" },
+      { name: "peak", default: 0, min: 0, max: 1, step: 0.01, doc: "0..1: a Peaks node's peak; widens the swings" },
+      { name: "peakPush", default: 0, step: 0.01, doc: "a Peaks node's push; speeds the swings up during peaks" },
+      { name: "peakWider", default: 2, min: 0, max: 10, step: 0.1, doc: "at a full peak the swings are this many times wider again" },
+      { name: "peakFaster", default: 3, min: 0, max: 20, step: 0.1, doc: "extra swings per second at a full peak" },
       { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
     ],
     outputs: [],
@@ -743,6 +805,9 @@ const defs: NodeDef[] = [
         width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity, hit: Math.max(0, num(i.hit)),
         scan: clamp(num(i.scan), 0, 1), scanSpread: clamp(num(i.scanSpread), 2, 120), scanLines: Math.round(clamp(num(i.scanLines), 2, 24)),
         scanBright: Math.max(0, num(i.scanBright)), flicker: clamp(num(i.flicker), 0, 1),
+        // Speed changes are integrated (push is the peaks added up over time), so a faster swing never jumps.
+        sweep: Math.max(0, num(i.sweep)), sweepPhase: Math.max(0, num(i.sweepSpeed)) * ctx.t + Math.max(0, num(i.peakFaster)) * num(i.peakPush),
+        sweepBoost: 1 + Math.max(0, num(i.peakWider)) * clamp(num(i.peak), 0, 1),
       });
       return {};
     },
