@@ -25,6 +25,10 @@ scene, mesh, name = repo / sys.argv[1], repo / sys.argv[2], sys.argv[3]
 S = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
 # Optional 5th argument: output name (default <name>_matched).
 stem = sys.argv[5] if len(sys.argv) > 5 else f"{name}_matched"
+# Optional 6th argument "level": turn mesh and camera together about the camera so the scene's true vertical (scene.json
+# "up", known from the photo) is Maya's +Y. A generated model is built as if the camera were level; the real camera
+# looks down (~23 degrees here), so without this the canyon's ground is tilted in Maya. The view is unchanged.
+level = len(sys.argv) > 6 and sys.argv[6] == "level"
 info = json.loads((scene / "scene.json").read_text())
 cam = json.loads((scene / "world" / name / "camera.json").read_text())
 V = cam["world_to_camera"]
@@ -61,9 +65,36 @@ cmds.setAttr(f"{cam_s}.filmFit", 2)  # vertical
 cmds.setAttr(f"{cam_s}.nearClipPlane", 0.001 * S)
 cmds.setAttr(f"{cam_s}.farClipPlane", 1000 * S)
 
+roots = [f"|{group}", f"|{cam_t}"]
+if level:
+    # True up in the photo's camera: scene space is x right, y up, z forward; OpenCV's y points down.
+    us = info.get("up", [0, 1, 0])
+    up_cv = [us[0], -us[1], us[2]]
+    a = [sum(Rt[r][k] * up_cv[k] for k in range(3)) for r in range(3)]  # into the model's world
+    n = math.sqrt(sum(x * x for x in a))
+    a = [x / n for x in a]
+    # Smallest rotation taking a onto +Y (Rodrigues).
+    v = [-a[2], 0.0, a[0]]  # a x (0, 1, 0)
+    c = a[1]
+    vx = [[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]]
+    vx2 = [[sum(vx[r][k] * vx[k][s] for k in range(3)) for s in range(3)] for r in range(3)]
+    f = 1 / (1 + c)
+    Rl = [[(1 if r == s else 0) + vx[r][s] + vx2[r][s] * f for s in range(3)] for r in range(3)]
+    # Euler angles for rotate order xyz (R = Rz Ry Rx).
+    ry = math.degrees(math.asin(max(-1, min(1, -Rl[2][0]))))
+    rx = math.degrees(math.atan2(Rl[2][1], Rl[2][2]))
+    rz = math.degrees(math.atan2(Rl[1][0], Rl[0][0]))
+    lev = cmds.group(empty=True, name=f"{name}_level")
+    cmds.parent(group, lev)
+    cmds.parent(cam_t, lev)
+    cmds.xform(lev, worldSpace=True, rotatePivot=pos, scalePivot=pos)
+    cmds.xform(lev, rotation=(rx, ry, rz))
+    roots = [f"|{lev}"]
+    print(f"levelled: true vertical was {math.degrees(math.acos(max(-1, min(1, c)))):.1f} degrees off the model's Y")
+
 out = mesh.parent
 abc = out / f"{stem}.abc"
-cmds.AbcExport(j=f"-frameRange 1 1 -uvWrite -worldSpace -writeVisibility -dataFormat ogawa -root |{group} -root |{cam_t} -file {abc.as_posix()}")
+cmds.AbcExport(j=f"-frameRange 1 1 -uvWrite -worldSpace -writeVisibility -dataFormat ogawa {' '.join('-root ' + r for r in roots)} -file {abc.as_posix()}")
 
 photo = (scene / info["image"]).resolve()
 ip = cmds.imagePlane(camera=cam_s, fileName=photo.as_posix())

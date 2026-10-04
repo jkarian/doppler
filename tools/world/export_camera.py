@@ -18,6 +18,8 @@ scene, cam = repo / sys.argv[1], sys.argv[2]
 cmds.loadPlugin("AbcExport", quiet=True)
 cmds.file(str(scene), open=True, force=True)
 out = scene.with_name(scene.stem + "_cam")
+# The camera may sit under a levelling group: work on a world-space copy at the top level, so the file stands alone.
+cam = cmds.parent(cmds.duplicate(cam, name=cam + "_export", returnRootsOnly=True)[0], world=True)[0] if cmds.listRelatives(cam, parent=True) else cam
 cmds.AbcExport(j=f"-frameRange 1 1 -worldSpace -dataFormat ogawa -root |{cam} -file {out.with_suffix('.abc').as_posix()}")
 shape = cmds.listRelatives(cam, shapes=True, type="camera")[0]
 planes = cmds.listConnections(f"{shape}.imagePlane", source=True) or []
