@@ -545,7 +545,7 @@
    ],
    "name": "Scan: drops only",
    "params": {
-    "expr": "2.5"
+    "expr": "2.5 * a * (0.7 + 0.3 * b)"
    }
   },
   {
@@ -732,12 +732,12 @@
    "name": "Setup: MRI scan",
    "params": {
     "on": 1,
-    "intro": 1,
-    "build": 1,
+    "intro": 0,
+    "build": 0,
     "drop": 1,
-    "breakdown": 1,
-    "normal": 1,
-    "outro": 1
+    "breakdown": 0,
+    "normal": 0,
+    "outro": 0
    },
    "pos": [
     1630,
