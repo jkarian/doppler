@@ -773,13 +773,16 @@ const defs: NodeDef[] = [
       "decay. positions: u,v[,area,brightness] picture points separated by ; (place them on the display with N: drag, scroll for " +
       "area, shift+scroll for brightness). Lights further than near feet (mid and far ground) are fired by the sounds " +
       "(names separated by |): pattern 0 walks through them in order, 1 sends the first sound to the left half and the second " +
-      "to the right, 2 is seeded random, 3 sends a sweep through every light (near ones too) from the nearest to the farthest at sweepRate lights a second. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
+      "to the right, 2 is seeded random, 3 sends a wave through every light (near ones too) from the nearest to the farthest on every downbeat, one light per " +
+      "sweepStep beats. sectionPatterns changes the pattern with the song's sections. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
       "by |): all of them come on together and fade over nearDecay. Up to 16 show at once, the brightest 7 with shadows.",
     inputs: [
       { name: "positions", default: "0.5,0.7", kind: "const" },
       { name: "sounds", default: "tick|tock", kind: "const" },
       { name: "pattern", default: 1, kind: "const", min: 0, max: 3, step: 1 },
-      { name: "sweepRate", default: 8, kind: "const", min: 1, max: 60, step: 1, doc: "pattern 3: lights per second as each sweep runs from near to far" },
+      { name: "sectionPatterns", default: "", kind: "const", doc: "pattern per song section, separated by |; the last one carries on (\"1|3\": tick-tock in the first section, the sweep after). Empty: pattern everywhere" },
+      { name: "sweepStep", default: 0.25, kind: "const", min: 0.0625, max: 2, step: 0.0625, doc: "pattern 3: beats between one light and the next (0.25 = sixteenth notes)" },
+      { name: "sweepDecay", default: 0.5, kind: "const", min: 0.05, max: 5, step: 0.05, doc: "pattern 3: seconds each light takes to go out as the wave passes" },
       { name: "seed", default: 1, kind: "const", step: 1 },
       { name: "attack", default: 0.04, kind: "const", min: 0, max: 2, step: 0.01, doc: "seconds to come on" },
       { name: "decay", default: 2, kind: "const", min: 0.05, max: 10, step: 0.05, doc: "seconds to go out" },
@@ -810,7 +813,15 @@ const defs: NodeDef[] = [
       // Near to far over every light: a sweep only reads if it starts in front (near ones still also fire on moments).
       const byDepth = pts.map((_, k) => k).sort((a, b) => feet[a] - feet[b]);
       const groups = String(c.sounds).split("|").map((s) => s.trim()).filter(Boolean);
-      const pattern = Math.round(num(c.pattern));
+      // The pattern can change with the song: sectionPatterns "1|3" = the first section uses 1, the rest 3.
+      const sections = ctx.music?.a.sections ?? [];
+      const perSection = String(c.sectionPatterns ?? "").split("|").map((s) => s.trim()).filter(Boolean).map(Number);
+      const patternAt = (t: number) => {
+        if (!perSection.length) return Math.round(num(c.pattern));
+        let idx = sections.findIndex((s) => t >= s.start && t < s.end);
+        if (idx < 0) idx = sections.length && t >= sections[sections.length - 1].end ? sections.length - 1 : 0;
+        return Math.round(perSection[Math.min(idx, perSection.length - 1)]);
+      };
       const rand = seeded(num(c.seed) * 7919 + 13);
       // Every hit of every named sound, in time order, with the light it fires.
       const hits: [number, number, number, number][] = []; // time, strength, light, decay
@@ -819,12 +830,12 @@ const defs: NodeDef[] = [
       const next = groups.map(() => 0);
       let walk = 0;
       let last = -1;
-      const sweeps: [number, number, number, number][] = [];
-      const rate = Math.max(0.1, num(c.sweepRate));
       for (const h of hits) {
         let light = 0;
         if (n === 0) break;
-        if (pattern === 1 && groups.length > 1) {
+        const pattern = patternAt(h[0]);
+        if (pattern === 3) light = -1; // the sweep runs on the bar grid instead (below)
+        else if (pattern === 1 && groups.length > 1) {
           // Split left to right among the sounds: tick lights the left side, tock the right.
           const per = Math.max(1, Math.floor(n / groups.length));
           const lo = h[2] * per;
@@ -833,16 +844,20 @@ const defs: NodeDef[] = [
         } else if (pattern === 2) {
           do light = far[Math.floor(rand() * n)];
           while (n > 1 && light === last);
-        } else if (pattern === 3) {
-          // Each hit sends a sweep out from the nearest light to the farthest, one light per 1/sweepRate seconds.
-          byDepth.forEach((k, j) => sweeps.push([h[0] + j / rate, h[1], k, h[3]]));
-          light = -1;
         } else light = order[walk++ % n];
         last = light;
         h[2] = light;
       }
       if (n === 0) hits.length = 0;
-      if (pattern === 3) hits.splice(0, hits.length, ...sweeps);
+      for (let k = hits.length - 1; k >= 0; k--) if (hits[k][2] < 0) hits.splice(k, 1);
+      // Sweep (pattern 3): on every downbeat a wave runs from the nearest light out to the farthest, one light per
+      // sweepStep beats (0.25 = sixteenth notes), so its speed follows the song's tempo.
+      const beat = ctx.music ? 60 / Math.max(1, ctx.music.a.tempo) : 0.5;
+      const stepT = Math.max(0.01, num(c.sweepStep)) * beat;
+      for (const d of ctx.music?.a.downbeats ?? []) {
+        if (patternAt(d) !== 3) continue;
+        byDepth.forEach((k, j) => hits.push([d + j * stepT, 1, k, num(c.sweepDecay)]));
+      }
       // Big moments: drops (as sure as the analysis is) and phrase starts (softer), all near lights at once.
       const kinds = String(c.moments).split("|").map((s) => s.trim());
       const moments: [number, number][] = [];
@@ -856,7 +871,7 @@ const defs: NodeDef[] = [
       }
       for (const [t, s] of moments) for (const k of near) hits.push([t, s, k, num(c.nearDecay)]);
       hits.sort((a, b) => a[0] - b[0]);
-      const longest = Math.max(num(c.decay), num(c.nearDecay));
+      const longest = Math.max(num(c.decay), num(c.nearDecay), num(c.sweepDecay));
       return { pts, hits, attack: num(c.attack), longest };
     },
     eval: (i, ctx, state) => {
