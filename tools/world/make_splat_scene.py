@@ -25,6 +25,79 @@ from background_layer import WORK_W, fill_opencv, find_band  # noqa: E402
 from scene_prep import compute_normals, save_normals  # noqa: E402
 
 
+def snap_parts(scene: Path, bake_dir: Path, raw, zf, zb, ab, warp):
+    """Put each freestanding part's depth exactly on its outline in the photo.
+
+    A generated model's spire is a similar rock in a slightly different place and size, and the smooth flow moves
+    it with the background behind it. Here: find the part in the model's own render (freestanding = pixels with
+    another surface clearly behind them, the connected piece nearest the photo's outline), fit it onto the photo's
+    outline (bounding box to bounding box: shift and stretch), and take the part's depth from there. Where the
+    flow-warped model still has the part but the photo shows what's behind, use the surface behind instead.
+    """
+    zf_raw, af_raw, zb_raw, ab_raw = raw
+    H, W = zf.shape
+    parts = json.loads((scene / "parts.json").read_text())["parts"]
+    info = json.loads((scene / "scene.json").read_text())
+    clahe = cv2.createCLAHE(3.0, (8, 8))
+    grey = lambda p: clahe.apply(cv2.cvtColor(np.asarray(Image.open(p).convert("RGB").resize((W, H))), cv2.COLOR_RGB2GRAY))
+    photo_g, render_g = grey(scene / info["image"]), grey(bake_dir / "front.png")
+    for part in sorted(parts, key=lambda p: -p["order"]):  # far to near, so nearer parts win
+        if not part.get("freestanding"):
+            continue
+        path = scene / "parts" / f"{part['name'].replace(' ', '_')}.png"
+        if not path.exists():
+            continue
+        P = np.asarray(Image.open(path).convert("L").resize((W, H), Image.NEAREST)) > 127
+        if P.sum() < 50:
+            continue
+        ys, xs = np.nonzero(P)
+        x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+        # Look for the part's picture in the model's render (its texture was made from the photo), within a window
+        # around the photo's outline, over a range of sizes: normalised cross-correlation on contrast-equalised grey.
+        pad = int(max(x1 - x0, y1 - y0) * 0.5) + 160
+        wx0, wx1, wy0, wy1 = max(0, x0 - pad), min(W, x1 + pad), max(0, y0 - pad), min(H, y1 + pad)
+        s = 0.5  # work at half size
+        tpl = cv2.resize(photo_g[y0:y1 + 1, x0:x1 + 1], None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        tmask = cv2.resize(P[y0:y1 + 1, x0:x1 + 1].astype(np.uint8) * 255, (tpl.shape[1], tpl.shape[0]), interpolation=cv2.INTER_NEAREST)
+        win = cv2.resize(render_g[wy0:wy1, wx0:wx1], None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        best = None
+        for scale in np.arange(0.6, 1.65, 0.05):
+            t = cv2.resize(tpl, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            m = cv2.resize(tmask, (t.shape[1], t.shape[0]), interpolation=cv2.INTER_NEAREST)
+            if t.shape[0] >= win.shape[0] or t.shape[1] >= win.shape[1] or t.shape[0] < 8 or t.shape[1] < 8:
+                continue
+            res = cv2.matchTemplate(win, t, cv2.TM_CCOEFF_NORMED, mask=m)
+            res = np.nan_to_num(res, nan=-1, posinf=-1, neginf=-1)
+            _, score, _, loc = cv2.minMaxLoc(res)
+            if best is None or score > best[0]:
+                best = (score, scale, loc)
+        if best is None or best[0] < 0.5:
+            print(f"  {part['name']}: not found in the model's render (best match {best[0] if best else 0:.2f}), left to the flow")
+            continue
+        score, scale, (lx, ly) = best
+        rx0, ry0 = wx0 + int(lx / s), wy0 + int(ly / s)
+        rx1, ry1 = rx0 + int((x1 - x0) * scale), ry0 + int((y1 - y0) * scale)
+        # The part in the render: the photo's outline, moved and sized onto the match.
+        R = np.zeros((H, W), bool)
+        Pm = cv2.resize(P[y0:y1 + 1, x0:x1 + 1].astype(np.uint8), (rx1 - rx0 + 1, ry1 - ry0 + 1), interpolation=cv2.INTER_NEAREST) > 0
+        hh, ww = min(Pm.shape[0], H - ry0), min(Pm.shape[1], W - rx0)
+        R[ry0:ry0 + hh, rx0:rx0 + ww] = Pm[:hh, :ww]
+        # Photo pixel -> model pixel: bounding box onto bounding box.
+        gx, gy = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+        sx, sy = (rx1 - rx0 + 1) / (x1 - x0 + 1), (ry1 - ry0 + 1) / (y1 - y0 + 1)
+        mx, my = (rx0 + (gx - x0) * sx).astype(np.float32), (ry0 + (gy - y0) * sy).astype(np.float32)
+        z_part = cv2.remap(np.where(R, zf_raw, 0).astype(np.float32), mx, my, cv2.INTER_NEAREST, borderValue=0)
+        # Inside the photo's outline: the part's own depth (or its median where the shapes differ).
+        fill = np.median(zf_raw[R])
+        zf = np.where(P, np.where(z_part > 0, z_part, fill), zf)
+        # The flow-warped model's copy of the part, outside the photo's outline: show what's behind it there.
+        ghost = (warp(R.astype(np.float32)) > 0.5) & ~cv2.dilate(P.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+        zf = np.where(ghost & (ab > 0), zb, zf)
+        print(f"  {part['name']}: found in the render {rx0 - x0:+d},{ry0 - y0:+d} px off at {scale:.2f}x size (match {score:.2f}); "
+              f"{ghost.sum()} ghost pixels now show what's behind")
+    return zf
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("scene", type=Path, help="source scene (with world/bake from bake_splat.py)")
@@ -35,6 +108,9 @@ def main() -> None:
     ap.add_argument("--flow-align", action="store_true",
                     help="warp the renders onto the photo by optical flow first (for a model whose shapes are close but "
                          "not exact, e.g. from Tripo: its edges land on the photo's edges)")
+    ap.add_argument("--parts", action="store_true",
+                    help="with --flow-align: snap each freestanding part of parts.json (the spire, the fin...) onto its outline "
+                         "in the photo (parts/*.png from segment_parts.py); the smooth flow can't move thin parts on its own")
     args = ap.parse_args()
 
     info = json.loads((args.scene / "scene.json").read_text())
@@ -60,10 +136,13 @@ def main() -> None:
         gx, gy = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
         mx, my = gx + flow[..., 0], gy + flow[..., 1]
         warp = lambda a, how=cv2.INTER_NEAREST: cv2.remap(a.astype(np.float32), mx, my, how, borderMode=cv2.BORDER_REPLICATE)
+        raw = (zf, af, zb, ab)
         zf, af, zb, ab = warp(zf).astype(np.float64), warp(af), warp(zb).astype(np.float64), warp(ab)
         behind_rgb = warp(behind_rgb, cv2.INTER_LINEAR)
         print(f"flow-aligned: median shift {np.median(np.hypot(flow[..., 0], flow[..., 1])):.1f} px, 95th percentile "
               f"{np.percentile(np.hypot(flow[..., 0], flow[..., 1]), 95):.1f} px")
+        if args.parts:
+            zf = snap_parts(args.scene, bake, raw, zf, zb, ab, warp)
 
     # The splat's depths on the old scene's range: match the distributions of log depth over the land.
     ok = ~sky & (af > 0.5) & (zf > 0)
