@@ -605,6 +605,29 @@ fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool, so
   return lit;
 }
 
+// Read a half-res visibility texture at full res without bleeding across depth jumps: plain bilinear mixes a
+// shadowed far pixel into the near rock in front of it, which draws dark stair-stepped outlines along every
+// silhouette. Each of the 4 nearest texels counts only as much as its depth matches this pixel's.
+fn visUp(tex: texture_2d<f32>, uv: vec2f, z: f32) -> vec4f {
+  let size = shadowSize();
+  let f = uv * size - 0.5;
+  let b = floor(f);
+  let fr = f - b;
+  var sum = vec4f(0.0);
+  var wsum = 0.0;
+  for (var k = 0; k < 4; k++) {
+    let o = vec2i(k & 1, k >> 1);
+    let t = clamp(vec2i(b) + o, vec2i(0), vec2i(size) - 1);
+    let zt = depthNearest((vec2f(t) + 0.5) / size);
+    let dz = (zt - z) / (0.03 * z);
+    let bw = select(1.0 - fr.x, fr.x, o.x == 1) * select(1.0 - fr.y, fr.y, o.y == 1);
+    let w = bw * (exp(-dz * dz) + 1e-3);
+    sum += w * textureLoad(tex, t, 0);
+    wsum += w;
+  }
+  return sum / max(wsum, 1e-6);
+}
+
 fn toSrgb(c: vec3f) -> vec3f {
   let lo = c * 12.92;
   let hi = 1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055;
@@ -625,8 +648,8 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   let hit = lightAt(p);
   // Slight wrap so rough AI-derived normals don't go hard black at the terminator.
   let ndl = clamp((dot(n, hit.l) + 0.15) / 1.15, 0.0, 1.0);
-  var vis = select(textureSampleLevel(shadowTex, samp, uv, 0.0), vec4f(1.0), u.shadows < 0.5);
-  var vis2 = select(textureSampleLevel(shadowTex2, samp, uv, 0.0), vec4f(1.0), u.shadows < 0.5);
+  var vis = select(visUp(shadowTex, uv, z), vec4f(1.0), u.shadows < 0.5);
+  var vis2 = select(visUp(shadowTex2, uv, z), vec4f(1.0), u.shadows < 0.5);
   let shadow = vis.r;
   let haze = exp(-u.hazeBeta * z);
   // Sun on the floor can be held back so it lights the walls and high ground, however high it climbs.

@@ -773,12 +773,13 @@ const defs: NodeDef[] = [
       "decay. positions: u,v[,area,brightness] picture points separated by ; (place them on the display with N: drag, scroll for " +
       "area, shift+scroll for brightness). Lights further than near feet (mid and far ground) are fired by the sounds " +
       "(names separated by |): pattern 0 walks through them in order, 1 sends the first sound to the left half and the second " +
-      "to the right, 2 is seeded random, 3 sweeps every light (near ones too) from near to far, 4 from far to near. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
+      "to the right, 2 is seeded random, 3 sends a sweep through every light (near ones too) from the nearest to the farthest at sweepRate lights a second. Nearer lights are kept for bigger moments (moments: drops and/or phrases, separated " +
       "by |): all of them come on together and fade over nearDecay. Up to 16 show at once, the brightest 7 with shadows.",
     inputs: [
       { name: "positions", default: "0.5,0.7", kind: "const" },
       { name: "sounds", default: "tick|tock", kind: "const" },
-      { name: "pattern", default: 1, kind: "const", min: 0, max: 4, step: 1 },
+      { name: "pattern", default: 1, kind: "const", min: 0, max: 3, step: 1 },
+      { name: "sweepRate", default: 8, kind: "const", min: 1, max: 60, step: 1, doc: "pattern 3: lights per second as each sweep runs from near to far" },
       { name: "seed", default: 1, kind: "const", step: 1 },
       { name: "attack", default: 0.04, kind: "const", min: 0, max: 2, step: 0.01, doc: "seconds to come on" },
       { name: "decay", default: 2, kind: "const", min: 0.05, max: 10, step: 0.05, doc: "seconds to go out" },
@@ -818,6 +819,8 @@ const defs: NodeDef[] = [
       const next = groups.map(() => 0);
       let walk = 0;
       let last = -1;
+      const sweeps: [number, number, number, number][] = [];
+      const rate = Math.max(0.1, num(c.sweepRate));
       for (const h of hits) {
         let light = 0;
         if (n === 0) break;
@@ -830,15 +833,16 @@ const defs: NodeDef[] = [
         } else if (pattern === 2) {
           do light = far[Math.floor(rand() * n)];
           while (n > 1 && light === last);
-        } else if (pattern === 3 || pattern === 4) {
-          // Sweep by distance: nearest outward (3) or farthest inward (4), then start over.
-          const m = byDepth.length;
-          light = byDepth[pattern === 3 ? walk++ % m : m - 1 - (walk++ % m)];
+        } else if (pattern === 3) {
+          // Each hit sends a sweep out from the nearest light to the farthest, one light per 1/sweepRate seconds.
+          byDepth.forEach((k, j) => sweeps.push([h[0] + j / rate, h[1], k, h[3]]));
+          light = -1;
         } else light = order[walk++ % n];
         last = light;
         h[2] = light;
       }
       if (n === 0) hits.length = 0;
+      if (pattern === 3) hits.splice(0, hits.length, ...sweeps);
       // Big moments: drops (as sure as the analysis is) and phrase starts (softer), all near lights at once.
       const kinds = String(c.moments).split("|").map((s) => s.trim());
       const moments: [number, number][] = [];
