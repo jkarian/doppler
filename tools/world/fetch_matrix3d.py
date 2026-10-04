@@ -11,6 +11,14 @@ from huggingface_hub import hf_hub_download, snapshot_download
 from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
 
 CK = Path("/mnt/c/AI_Models/matrix3d/checkpoints")
+CK.mkdir(parents=True, exist_ok=True)
+repo_ck = Path("/opt/world/Matrix-3D/checkpoints")
+if repo_ck.is_dir() and not repo_ck.is_symlink():
+    for f in repo_ck.iterdir():
+        f.rename(CK / f.name) if not (CK / f.name).exists() else None
+    repo_ck.rmdir()
+if not repo_ck.exists():
+    repo_ck.symlink_to(CK)
 
 
 def get(what, fn):
