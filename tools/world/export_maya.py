@@ -20,6 +20,9 @@ import maya.cmds as cmds  # noqa: E402
 
 repo = Path(__file__).resolve().parents[2]
 scene, mesh, name = repo / sys.argv[1], repo / sys.argv[2], sys.argv[3]
+# Optional 4th argument: scale to real size, e.g. feet per model unit (then 1 Maya unit = 1 foot). The mesh and the
+# camera's position scale together, so the view through the camera is unchanged.
+S = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
 info = json.loads((scene / "scene.json").read_text())
 cam = json.loads((scene / "world" / name / "camera.json").read_text())
 V = cam["world_to_camera"]
@@ -39,6 +42,10 @@ before = set(cmds.ls(assemblies=True))
 cmds.file(str(mesh), i=True, type="OBJ", ignoreVersion=True, options="mo=1", namespace="geo")
 geo = [n for n in cmds.ls(assemblies=True) if n not in before]
 group = cmds.group(geo, name=f"{name}_geo")
+pos = [p * S for p in pos]
+if S != 1.0:
+    cmds.scale(S, S, S, group, pivot=(0, 0, 0), absolute=True)
+    cmds.makeIdentity(group, apply=True, scale=True)
 
 cam_t, cam_s = cmds.camera(name=f"{name}_cam")
 # Maya's xform matrix is row-vector form: rows are the local x, y, z axes in world space, then the position.
@@ -49,8 +56,8 @@ cmds.setAttr(f"{cam_s}.horizontalFilmAperture", h_mm / 25.4)
 cmds.setAttr(f"{cam_s}.verticalFilmAperture", v_mm / 25.4)
 cmds.setAttr(f"{cam_s}.focalLength", focal)
 cmds.setAttr(f"{cam_s}.filmFit", 2)  # vertical
-cmds.setAttr(f"{cam_s}.nearClipPlane", 0.001)
-cmds.setAttr(f"{cam_s}.farClipPlane", 1000)
+cmds.setAttr(f"{cam_s}.nearClipPlane", 0.001 * S)
+cmds.setAttr(f"{cam_s}.farClipPlane", 1000 * S)
 
 out = mesh.parent
 abc = out / f"{name}_matched.abc"
@@ -58,7 +65,7 @@ cmds.AbcExport(j=f"-frameRange 1 1 -uvWrite -worldSpace -writeVisibility -dataFo
 
 photo = (scene / info["image"]).resolve()
 ip = cmds.imagePlane(camera=cam_s, fileName=photo.as_posix())
-cmds.setAttr(f"{ip[1]}.depth", 50)
+cmds.setAttr(f"{ip[1]}.depth", 50 * S)
 ma = out / f"{name}_matched.ma"
 cmds.file(rename=str(ma))
 cmds.file(save=True, type="mayaAscii")
