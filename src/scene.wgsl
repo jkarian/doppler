@@ -181,6 +181,9 @@ struct Nooks {
 // has its own, carried past its outline so the mesh has no step there to stretch (depthTex stays the whole
 // picture's depth, for shadows, shafts and everything else that reads the scene).
 @group(0) @binding(11) var meshDepthTex: texture_2d<f32>;
+// The whole picture's depth: what the image-space shadows were worked out for. A layer behind compares its own
+// surface with it, so a strip the camera uncovers doesn't borrow the shadow of the rock in front of it.
+@group(0) @binding(12) var sceneDepthTex: texture_2d<f32>;
 const NOOK_SHADOWS = 7u;
 
 // Bright at the light, easing to nothing at the radius.
@@ -647,16 +650,22 @@ fn visUp(tex: texture_2d<f32>, uv: vec2f, z: f32) -> vec4f {
   let fr = f - b;
   var sum = vec4f(0.0);
   var wsum = 0.0;
+  var seen = 0.0;
   for (var k = 0; k < 4; k++) {
     let o = vec2i(k & 1, k >> 1);
     let t = clamp(vec2i(b) + o, vec2i(0), vec2i(size) - 1);
-    let zt = depthNearest((vec2f(t) + 0.5) / size);
+    let zt = textureLoad(sceneDepthTex, clamp(vec2i((vec2f(t) + 0.5) / size * u.imgSize), vec2i(0), vec2i(u.imgSize) - 1), 0).r;
     let dz = (zt - z) / (0.03 * z);
     let bw = select(1.0 - fr.x, fr.x, o.x == 1) * select(1.0 - fr.y, fr.y, o.y == 1);
-    let w = bw * (exp(-dz * dz) + 1e-3);
+    let m = exp(-dz * dz);
+    let w = bw * (m + 1e-3);
     sum += w * textureLoad(tex, t, 0);
     wsum += w;
+    seen = max(seen, m);
   }
+  // None of the shadow texels saw this surface (a layer behind, uncovered by the camera): no image-space shadow
+  // is known for it, so leave it unshadowed rather than borrow the shadow of what's in front.
+  if (seen < 0.05) { return vec4f(1.0); }
   return sum / max(wsum, 1e-6);
 }
 
@@ -758,6 +767,13 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   }
   let base = select(mix(albedo * ambient, photo, u.baked), skyColor * (1.0 + u.skyBoost), sky);
   var color = base * u.baseDim + albedo * light;
+  // Aerial perspective: far land fades toward the sky's own colour at its height in the picture (the air between
+  // glows like the sky behind it), so distant ridges sit back instead of reading as black cut-outs against the
+  // gradient. Follows the gradient, so dusk mountains go rosy grey and day ones blue.
+  if (!sky && u.skyA.x > 0.0) {
+    let air = skyGradient(uv) * u.skyA.y * (1.0 + u.skyBoost) * u.baseDim;
+    color = mix(air, color, haze);
+  }
 
   // Sun shafts: only in the open air beyond the cave mouth, so they never veil the near walls.
   let air = smoothstep(u.far * 0.02, u.far * 0.12, z);

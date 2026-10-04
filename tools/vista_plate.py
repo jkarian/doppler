@@ -37,7 +37,7 @@ from PIL import Image
 from scipy import ndimage as ndi
 
 sys.path.insert(0, str(Path(__file__).parent))
-from scene_prep import linear_to_srgb, save_normals, srgb_to_linear  # noqa: E402
+from scene_prep import SKY_MODEL, linear_to_srgb, sky_probability, srgb_to_linear  # noqa: E402
 
 MODEL = "Ruicheng/moge-2-vitl-normal"
 VISTA_MIN_M = 100.0  # pillars and spire reach to 80 m in the markup
@@ -46,6 +46,7 @@ KEPT_DIFF = 10.0  # mean abs difference (0-255, 5 px box) below which plate and 
 FRAME_RGB = (139, 0, 0)  # layers_from_markup.py: "frame (cave walls)"
 PILLARS_RGB = (0, 80, 140)  # layers_from_markup.py: "pillars and spire"
 BEHIND_PX = 120  # how far behind the cave frame the pillars carry on (beyond any camera move)
+HAZE_VISIBILITY_M = 150_000.0  # how far the air lets you see: sets the haze on far land
 KEPT_ERODE_PX = 3  # the kept strip loses this much (scene pixels) to the near rock: its rim moves with it
 
 
@@ -118,8 +119,12 @@ def main() -> None:
     # 2. Plate depth.
     print(f"MoGe-2 on the plate at {W}x{H} ...")
     zm, valid, n_plate = moge(plate, args.resolution_level)
-    sky = ~valid
-    sky[kept] = sky_src[kept]  # trust the source's sky where the pixels are the same
+    # Sky: SegFormer on the plate, the one region of it that reaches the top. MoGe's own mask took the snow on the
+    # far peaks for sky (pink holes in the mountains under the sky gradient).
+    sky = sky_probability(Image.fromarray(plate), SKY_MODEL) > 0.5
+    lab, n = ndi.label(sky)
+    top = np.unique(lab[0][lab[0] > 0])
+    sky = np.isin(lab, top) if len(top) else sky
 
     # 3. Real distances: log-linear fit over the kept land.
     fit = kept & ~sky & valid & ~sky_src
@@ -136,6 +141,11 @@ def main() -> None:
         lo = L < L0
         L[lo] = L0 - (L0 - L[lo]) * (L0 - np.log(VISTA_MIN_M)) / (L0 - Lmin)
     z_plate[land] = np.clip(np.exp(L), VISTA_MIN_M, far * 0.95)
+    # Land MoGe has no depth for (bright snow it took for sky): the nearest land pixel's depth.
+    hole = ~sky & ~valid
+    if hole.any():
+        _, (iy, ix) = ndi.distance_transform_edt(~land, return_indices=True)
+        z_plate[hole] = z_plate[iy, ix][hole]
     print(f"  log depth stretch {a:.2f}; MoGe far/near {np.exp(np.quantile(np.log(zm[land]), 0.98) - np.quantile(np.log(zm[land]), 0.02)):.0f}x, "
           f"mapped {np.quantile(z_plate[land], 0.02):.0f}-{np.quantile(z_plate[land], 0.98):.0f} m")
 
@@ -221,7 +231,10 @@ def main() -> None:
         Image.fromarray(nrm).save(args.out / f"{name}_normal.png")
         background.append({"depth": f"{name}_depth.bin", "image": f"{name}_photo.png", "albedo": f"{name}_albedo.png", "normal": f"{name}_normal.png"})
 
-    scene = {**info, **main_files, "normal": "normal.png", "depth": "depth.bin",
+    if info.get("metersPerUnit") == 1.0:
+        # Clear desert air: about 150 km visibility (Koschmieder: extinction = 3.9 / visibility).
+        info = {**info, "haze": {**info.get("haze", {}), "beta": 3.9 / HAZE_VISIBILITY_M}}
+    scene = {**info, **main_files, "normal": "normal.png", "depth": "depth.bin", "graph": "vista",
              "depthModel": f"near rock from {args.scene.name}, vista: MoGe-2 on {args.plate.name}",
              "background": background if len(background) > 1 else background[0]}
     (args.out / "scene.json").write_text(json.dumps(scene, indent=2))

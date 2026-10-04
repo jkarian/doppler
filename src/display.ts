@@ -31,6 +31,7 @@ interface SceneInfo {
   normal: string;
   near: number;
   far: number;
+  graph?: string; // the graph this scene is tuned with (graphs/<name>.json), when not the default
   metersPerUnit?: number; // real scale, when known (e.g. scenes built from a distance markup)
   fovDeg: number;
   haze?: { airlight: number[]; beta: number };
@@ -69,7 +70,6 @@ const params = new URLSearchParams(location.search);
 const sceneName = params.get("scene") ?? "canyon";
 const sceneUrl = `scenes/${sceneName}/`;
 const trackName = params.get("track");
-const graphName = params.get("graph") ?? "default";
 
 const canvas = document.querySelector("canvas")!;
 const hud = document.querySelector<HTMLElement>("#hud")!;
@@ -87,6 +87,8 @@ async function main() {
   device.lost.then((info) => fail(`GPU device lost: ${info.message}`));
 
   const info: SceneInfo = await (await fetch(sceneUrl + "scene.json")).json();
+  // The graph: ?graph=name, else the scene's own (tuned to its scale), else the default.
+  const graphName = params.get("graph") ?? info.graph ?? "default";
   const loadBitmap = (name: string) =>
     fetch(sceneUrl + name).then((r) => r.blob()).then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }));
   const [photoBmp, albedoBmp, normalBmp, depthBuf] = await Promise.all([
@@ -288,6 +290,7 @@ async function main() {
       { binding: 9, resource: { buffer: nookBuf } },
       { binding: 10, resource: shadowA2.createView() },
       { binding: 11, resource: meshDepthTex.createView() },
+      { binding: 12, resource: depthTex.createView() },
     ],
   });
   // The layers behind draw with the same pipeline, each with its own depth, colour and normals.
@@ -307,6 +310,7 @@ async function main() {
         { binding: 9, resource: { buffer: nookBuf } },
         { binding: 10, resource: shadowA2.createView() },
         { binding: 11, resource: bgTex.depth.createView() },
+        { binding: 12, resource: depthTex.createView() },
       ],
     }),
   );
