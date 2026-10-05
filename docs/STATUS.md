@@ -1,6 +1,6 @@
 # Doppler Canyon: status and handoff
 
-Last updated 2026-10-04 (afternoon): three-layer matte-painted vista works (scenes/canyon-vista). Read this first when picking the project back up.
+Last updated 2026-10-04 (evening): vista scene with mega fan lasers in drop 2 (scenes/canyon-vista, graphs/vista.json). Read this first when picking the project back up.
 
 ## What it is
 
@@ -207,7 +207,14 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      then `vista_plate.py scenes/canyon-layers-moge images/canyon_midground.png scenes/canyon-vista --middle
      images/canyon_middle.png` (MoGe cave depth: the old fused depth's radial streaks cast straight shadow lines).
      Lasers have real width on true-scale scenes (angle at 500 m); rig fans hold 1 s (Peaks hold). Depth pre-pass
-     keeps three layers near single-layer cost. Waiting on the user: a cut-out of the orange rock column between the
+     keeps three layers near single-layer cost.
+     **Lasers (2026-10-04 evening, user happy):** beams thin and crisp, depth through brightness (laserNear), haze
+     texture in world space (airDensity). Rig fans ramp open over ~10 frames before the hit (Peaks lead), hold 1 s.
+     MRI scan replaced by two blue-purple **mega fan lasers** (megaLeft/megaRight in graphs/vista.json) on the canyon
+     rims (SkyLaser onVista, planeRoll 90, sweepOneWay): upright fans whose 2-inch line + 4 m trail crawls from just
+     short of the camera to the end of the gorge, 1/3 speed until it passes the spire, then 2x (clearAt). Drop 2 only
+     (Setup `drops`: "2"); the ground lasers sit drop 2 out ("-2"). On confident drops the right fan sweeps through
+     the camera: laser lens flare (user: "whoa that laser flare is cool"). Waiting on the user: a cut-out of the orange rock column between the
      spire and the right cave wall (in no cut-out, so the plate's repainted version shows). Open items: uncovered strips of layers behind get no image-space shadow (better than the wrong
      one; per-layer shadows would be the real fix); the river floor looks bright at the drop; the dark nook at the left mesa's base is in the painting; mountains map to ~13 km
      (markup says 20-30). User's idea, agreed direction: a general camera-mapping tool (split into layers, find
