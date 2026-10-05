@@ -224,7 +224,7 @@
    "params": {
     "azimuth": 0,
     "enabled": 1,
-    "maxArc": 18.5,
+    "maxArc": 0,
     "floorLight": 0.1,
     "gain": 1.7,
     "bounce": 0.2,
@@ -233,7 +233,7 @@
     "caveDepth": 5,
     "floorBelow": -350,
     "terminator": 0.85,
-    "minArc": 0
+    "minArc": -33
    }
   },
   {

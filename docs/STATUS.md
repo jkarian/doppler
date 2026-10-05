@@ -1,6 +1,65 @@
 # Doppler Canyon: status and handoff
 
-Last updated 2026-10-04 (evening): vista scene with mega fan lasers in drop 2 (scenes/canyon-vista, graphs/vista.json). Read this first when picking the project back up.
+Last updated 2026-10-04 (night). Read this first when picking the project back up; start with **Handoff 2026-10-04 night** below.
+
+## Handoff 2026-10-04 night (start here)
+
+**Where we are.** The main scene is `scenes/canyon-vista` with its own graph `graphs/vista.json` (loaded automatically):
+http://localhost:5173/?scene=canyon-vista&track=doomsday_clock-thomas_barrandon.m4a . The user is happy with it
+("this is great"). Everything is committed and pushed.
+
+**NEXT, first thing: a real sunrise (the user's words: "it's a hard ball and as soon as you see the edge the top sliver
+starts flaring and the flare gets bigger till it's full size and it moves to the centre of the ball till the centre has
+cleared the mountains").** Right now a soft glow ball appears first and the flare then switches on, which reads fake.
+Plan (not started):
+1. Hard sun disc drawn in the shader only on sky pixels (fs, where `sky`): angle between the pixel's view ray
+   `normalize(viewPos(uv, 1))` and the sun direction `normalize(u.lightPos)` under a disc radius (new uniform, e.g.
+   sunD.y, ~0.6 deg for drama; the real sun is 0.27). Crisp edge, so the ridge cuts it exactly. Add it after the
+   brightness cap, next to `lensFlare` (scene.wgsl, `if (u.flare > 0.0) { color += lensFlare(...) }`).
+2. In `display.ts` `sunScreen()`: instead of 9 samples in a ring, sample a grid over the disc (in image uv, through
+   `depthAt` against `info.far * 0.98` = open sky). flareVisible = visible fraction (try fraction^0.6 so a sliver
+   already flares); return the CENTROID of the visible samples as the flare centre (not the disc centre), so the flare
+   starts on the top sliver and slides to the middle as the sun clears the ridge.
+3. Remove the soft cores: the bloom's `exp(-r*r*900)*6` "disc, burnt out" term in `lensFlare` and shrink the base
+   `exp(-r*r*60)*1.2` core; the disc is real now. Keep halo, glow, streak, rays (Sun `bloom`, uniform sunD.x at
+   uniforms[88]).
+4. Check frame by frame around drop 1 (1:30-1:42): edge appears, sliver flares, flare grows and moves down to centre.
+Note: the user moved the sun sliders live before saving: vista graph Sun maxArc 0, minArc -33 (min off). Ask what they
+intend before changing them; with maxArc 0 the sun never goes above the skimming height.
+
+**Song layout (Doomsday Clock, vista graph).** Drops at 1:36, 2:53, 3:31 (`Setup.drops` picks drops by number).
+- Nook lights on the tick-tock from the start. Sun rises over 3 s into each drop, holds 5 s, sets (sunRise); height per
+  drop from sunHeight; drop 1 dimmer. Sunset bloom flare with it. Sun direction fixed straight into the gap
+  (a sideways swing looked like a UFO).
+- Drop 1: ground rigs' fans open in a wave from the nearest rig to the farthest over 4 s (SkyLaser `wave`).
+- Drop 2: only the blue-purple mega fan scan (two rim rigs, MRI-like lines with trails, 1/3 speed until past the spire,
+  then 2x, camera-hit laser flare on confident drops). Ground lasers sit it out.
+- Drop 3: ground rigs with full fans (Peaks lead 0.2 s: fans open over ~6 frames into the hit, hold 1 s).
+- Rigs turn smoothly to new aims (no one-frame jumps). Beams thin, depth through brightness, world-space haze texture.
+
+**Scene build (in order):**
+1. `tools/.venv/Scripts/python tools/layers_from_markup.py scenes/canyon-moge images/markup_layers.webp scenes/canyon-layers-moge`
+2. `tools/.venv/Scripts/python tools/vista_plate.py scenes/canyon-layers-moge images/canyon_midground.png scenes/canyon-vista --middle images/canyon_middle.png --mountains 0.33`
+3. `tools/.venv/Scripts/python tools/river_flow.py scenes/canyon-vista` (always after 2: it writes the river mask and flow
+   directions into the vista layer's albedo/normal alpha; uses the user's painted `images/river_mask.png`).
+
+**New this session (all nodes/settings live in the editor, E, and the music monitor, G):**
+- Three cut-out layers (cave, the user's pillar/spire layer, vista plate) with depth pre-pass and 4x MSAA alpha to
+  coverage (anti-aliased outlines). Vista plate dehazed (capped), mountains sunk to a third (--mountains).
+- Sky node: haze by hand (haze, hazeNear, hazeFar in metres) plus sliders on the monitor.
+- Water node ("River"): flow-map foam along the river's own course (banks averaged, heads for its exit), curl-noise
+  swirl, sheen (Fresnel sky reflection), Blinn glints; features scale with distance.
+- Sun node: minArc/maxArc (+ monitor sliders), rise, bloom (sunset flare). Peaks: hold, lead. Setup: drops, lead.
+  SkyLaser: wave, sweepOneWay, clearAt/nearSpeed/farSpeed, onVista, planeRoll, spin, camHit, flare. DropHit: number.
+- Performance: ~5 ms/frame at 1080p on the 4090 in busy moments.
+
+**Open items:** the drop-beat brightness jump from the sun's on/off gate ("ember" 0.2 -> 1 at once; easing it is a
+choice); the orange rock column between the spire and the right cave wall is in no cut-out (the plate's repainted
+version shows; the user could add it to the middle layer); uncovered strips of layers behind get no image-space shadow;
+drop 2 not yet reviewed in a clip since the sun changes. Ideas raised: a general camera-mapping tool (split into
+layers, find where each needs back information, inpaint, depth per layer) = the one-command image-to-scene goal;
+log this session's plain-language requests and the mechanisms they became in the Doppler brief's "Lessons for
+Doppler" (offered, not done yet).
 
 ## What it is
 
