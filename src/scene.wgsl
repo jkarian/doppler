@@ -405,16 +405,10 @@ fn depthAt(uv: vec2f) -> f32 {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-fn meshDepthAt(uv: vec2f) -> f32 {
+fn meshDepthGrid(g: vec2u) -> f32 {
   let size = vec2i(u.imgSize);
-  let t = uv * u.imgSize - 0.5;
-  let i = vec2i(floor(t));
-  let f = fract(t);
-  let a = textureLoad(meshDepthTex, clamp(i, vec2i(0), size - 1), 0).r;
-  let b = textureLoad(meshDepthTex, clamp(i + vec2i(1, 0), vec2i(0), size - 1), 0).r;
-  let c = textureLoad(meshDepthTex, clamp(i + vec2i(0, 1), vec2i(0), size - 1), 0).r;
-  let d = textureLoad(meshDepthTex, clamp(i + vec2i(1, 1), vec2i(0), size - 1), 0).r;
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  let t = vec2i(round(vec2f(g) / u.grid * u.imgSize - 0.5));
+  return textureLoad(meshDepthTex, clamp(t, vec2i(0), size - 1), 0).r;
 }
 
 // Unblended depth: bilinear blending across silhouettes invents geometry that casts thin false shadows.
@@ -434,7 +428,7 @@ fn project(p: vec3f) -> vec2f {
 }
 
 struct VsOut {
-  @builtin(position) pos: vec4f,
+  @builtin(position) @invariant pos: vec4f,  // invariant: the depth pre-pass and the shading pass must agree exactly
   @location(0) uv: vec2f,
   @location(1) @interpolate(flat) layer: u32,  // 0 main, 1 background layer
 };
@@ -452,17 +446,20 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   // A square whose corners sit at very different depths spans a silhouette (near rock against far
   // canyon), not a surface: stretched by parallax it smears into hairs. Put the whole square at the
   // far side's depth so the near edge stays crisp and nothing stretches across the gap.
-  let d00 = meshDepthAt(vec2f(g0) / u.grid);
-  let d10 = meshDepthAt(vec2f(g0 + vec2u(1, 0)) / u.grid);
-  let d01 = meshDepthAt(vec2f(g0 + vec2u(0, 1)) / u.grid);
-  let d11 = meshDepthAt(vec2f(g0 + vec2u(1, 1)) / u.grid);
+  // Mesh corners sit on the depth map's grid: one read each (a bilinear blend per corner cost 16 reads per vertex,
+  // and with several layers drawn twice, depth pre-pass and shading, that was most of the frame).
+  let d00 = meshDepthGrid(g0);
+  let d10 = meshDepthGrid(g0 + vec2u(1, 0));
+  let d01 = meshDepthGrid(g0 + vec2u(0, 1));
+  let d11 = meshDepthGrid(g0 + vec2u(1, 1));
   let zmin = min(min(d00, d10), min(d01, d11));
   let zmax = max(max(d00, d10), max(d01, d11));
   let silhouette = zmax > zmin * 1.08;
   // Without a background layer, the square moves to the far side's depth: crisp edges, but it detaches from
   // its near neighbours and cracks open (dark dots) when the camera moves. With one, the square stays a
   // continuous stretched surface (no cracks), pushed back behind the hidden rock below.
-  let z = select(meshDepthAt(uv), zmax, silhouette && u.up.w < 0.5);
+  let dHere = select(select(d00, d10, corner.x == 1u), select(d01, d11, corner.x == 1u), corner.y == 1u);
+  let z = select(dHere, zmax, silhouette && u.up.w < 0.5);
 
   let pc = viewPos(uv, z) - u.camPos;
   let tanXY = vec2f(u.tanHalfFov * u.aspect, u.tanHalfFov);
@@ -484,6 +481,15 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
   out.uv = uv;
   out.layer = layer;
   return out;
+}
+
+// Depth pre-pass: every layer's surface, cut-outs see-through outside their outline (alpha in the photo texture).
+// The shading pass then lights only the nearest surface per pixel: with three full-screen layers, shading each
+// before the depth test (which a discard in the shading shader forces) cost about 3x.
+@fragment
+fn fs_depth(@location(0) uv: vec2f) -> @location(0) vec4f {
+  if (textureSample(photoTex, samp, uv).a < 0.5) { discard; }
+  return vec4f(0.0);
 }
 
 // Shadows, in three passes over a half-resolution image-space texture:
@@ -564,7 +570,7 @@ override HORIZONTAL: bool = true;
 
 @fragment
 fn fs_blur(@builtin(position) frag: vec4f) -> @location(0) vec4f {
-  const R = 3;  // small: just enough to dissolve the march jitter, so shadow edges stay crisp
+  const R = 4;  // small: just enough to dissolve the march jitter, so shadow edges stay crisp
   let size = shadowSize();
   let texel = vec2i(frag.xy);
   let uv = frag.xy / size;
@@ -597,9 +603,16 @@ fn fs_blur(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 
 // March from the surface toward the light and look for depth in the way.
 fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool, soft: f32) -> f32 {
-  const STEPS = 64;  // more steps, less jitter to blur away
-  // Fixed per-pixel jitter (interleaved gradient noise) breaks step aliasing into fine grain. No time term: same frame every run.
-  let jitter = fract(52.9829189 * fract(dot(frag, vec2f(0.06711056, 0.00583715))));
+  const STEPS = 128;  // more steps, less jitter to blur away (at true scale the rays are long)
+  // Fixed per-pixel jitter breaks step aliasing into fine grain. A hash, not interleaved gradient noise: at true scale
+  // the rays are long, and the gradient noise's regular pattern showed through the blur as a moire-like dot grid.
+  // No time term: same frame every run.
+  var h = bitcast<vec2u>(vec2i(frag));
+  h = h * 1664525u + 1013904223u;
+  h.x += h.y * 1664525u; h.y += h.x * 1664525u;
+  h = h ^ (h >> vec2u(16u));
+  h.x += h.y * 1664525u;
+  let jitter = f32(h.x & 0xffffffu) / 16777216.0;
   // March all the way to the light: the beam must stop at the first surface it meets, near or far.
   let maxLen = dist;
   var lit = 1.0;
@@ -681,9 +694,9 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   let albedo = textureSample(albedoTex, samp, uv).rgb;   // de-lit, linear (srgb texture)
   let photoA = textureSample(photoTex, samp, uv);
   let photo = photoA.rgb;
-  // Cut-out layers (tools/vista_plate.py: the cave, the pillars) are see-through outside their outline, so the
-  // layers behind show there, with no stretched edge between them.
-  if (photoA.a < 0.5) { discard; }
+  // Cut-outs (the cave, the pillars) are see-through outside their outline. The depth pre-pass (fs_depth) already
+  // left them out, and this pass only shades the surface that won there (depth test "equal"): no discard here,
+  // so the GPU can skip hidden fragments before shading them.
   // normal.png uses standard colours (z toward the camera); scene space has z into the scene.
   var n = normalize((textureSample(normalTex, samp, uv).rgb * 2.0 - 1.0) * vec3f(1.0, 1.0, -1.0));
   let z = depthAt(uv);
@@ -693,11 +706,16 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   // rock's fine brightness as height (cracks darker, so lower) and tilt the normal down its slope, so a raking
   // light picks out the texture. Fine scale only: the slope is measured two texels either side.
   let bump = u.scanLines.w;
+  // The detail's scale follows how small the picture is drawn: read from the mip level that matches a screen pixel,
+  // two of its texels apart. At level 0 on a 4K picture shown at 1080p, the slope skipped texels and the rock grain
+  // came out as moire.
+  let texPerPx = max(length(dpdx(uv) * u.imgSize), length(dpdy(uv) * u.imgSize));
+  let lod = max(0.0, log2(max(texPerPx, 1e-4)));
   if (bump > 0.0 && !sky) {
-    let px = 2.0 / u.imgSize;
+    let px = 2.0 * exp2(lod) / u.imgSize;
     let lw = vec3f(0.2126, 0.7152, 0.0722);
-    let hx = dot(textureSampleLevel(albedoTex, samp, uv + vec2f(px.x, 0.0), 0.0).rgb - textureSampleLevel(albedoTex, samp, uv - vec2f(px.x, 0.0), 0.0).rgb, lw);
-    let hy = dot(textureSampleLevel(albedoTex, samp, uv + vec2f(0.0, px.y), 0.0).rgb - textureSampleLevel(albedoTex, samp, uv - vec2f(0.0, px.y), 0.0).rgb, lw);
+    let hx = dot(textureSampleLevel(albedoTex, samp, uv + vec2f(px.x, 0.0), lod).rgb - textureSampleLevel(albedoTex, samp, uv - vec2f(px.x, 0.0), lod).rgb, lw);
+    let hy = dot(textureSampleLevel(albedoTex, samp, uv + vec2f(0.0, px.y), lod).rgb - textureSampleLevel(albedoTex, samp, uv - vec2f(0.0, px.y), lod).rgb, lw);
     // Picture right is +x; picture down is -y in scene space.
     n = normalize(n - bump * vec3f(hx, -hy, 0.0));
   }

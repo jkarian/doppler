@@ -216,12 +216,20 @@ async function main() {
 
   const code = await (await fetch(new URL("./scene.wgsl", import.meta.url))).text();
   const module = device.createShaderModule({ code });
+  // Depth pre-pass (every layer, cut-outs see-through), then shading of only the surface that won each pixel.
+  const depthPipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module, entryPoint: "vs" },
+    fragment: { module, entryPoint: "fs_depth", targets: [{ format, writeMask: 0 }] },
+    primitive: { topology: "triangle-list" },
+    depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
+  });
   const pipeline = device.createRenderPipeline({
     layout: "auto",
     vertex: { module, entryPoint: "vs" },
     fragment: { module, entryPoint: "fs", targets: [{ format }] },
     primitive: { topology: "triangle-list" },
-    depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
+    depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "equal" },
   });
   let zBuffer: GPUTexture | null = null;
 
@@ -311,6 +319,21 @@ async function main() {
         { binding: 10, resource: shadowA2.createView() },
         { binding: 11, resource: bgTex.depth.createView() },
         { binding: 12, resource: depthTex.createView() },
+      ],
+    }),
+  );
+  // The depth pre-pass reads only the mesh and the cut-out: its own bind groups (auto layouts don't mix).
+  const depthBindGroups = [
+    { photo: photoTex, mesh: meshDepthTex },
+    ...bgTexs.map((t) => ({ photo: t.photo, mesh: t.depth })),
+  ].map((t) =>
+    device.createBindGroup({
+      layout: depthPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: uniformBuf } },
+        { binding: 1, resource: device.createSampler({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear", maxAnisotropy: 8 }) },
+        { binding: 5, resource: t.photo.createView() },
+        { binding: 11, resource: t.mesh.createView() },
       ],
     }),
   );
@@ -1120,13 +1143,17 @@ async function main() {
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }],
       depthStencilAttachment: { view: zBuffer.createView(), depthLoadOp: "clear", depthClearValue: 1, depthStoreOp: "discard" },
     });
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.draw(grid[0] * grid[1] * 6);
-    // Behind it, the layers behind (instance 1, 2...): each only shows where the layers in front moved off it.
-    bgBindGroups.forEach((g, k) => {
+    // Main layer (instance 0), then the layers behind (instance 1, 2...): each only shows where the layers in front
+    // moved off it or are see-through. Depth first, then shading.
+    pass.setPipeline(depthPipeline);
+    depthBindGroups.forEach((g, k) => {
       pass.setBindGroup(0, g);
-      pass.draw(grid[0] * grid[1] * 6, 1, 0, k + 1);
+      pass.draw(grid[0] * grid[1] * 6, 1, 0, k);
+    });
+    pass.setPipeline(pipeline);
+    [bindGroup, ...bgBindGroups].forEach((g, k) => {
+      pass.setBindGroup(0, g);
+      pass.draw(grid[0] * grid[1] * 6, 1, 0, k);
     });
     pass.end();
     device.queue.submit([enc.finish()]);
