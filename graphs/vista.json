@@ -731,7 +731,7 @@
    "type": "Setup",
    "name": "Setup: MRI scan",
    "params": {
-    "on": 1,
+    "on": 0,
     "intro": 0,
     "build": 0,
     "drop": 1,
@@ -822,9 +822,10 @@
    "name": "Peaks in the song",
    "params": {
     "threshold": 0.06,
-    "attack": 0.05,
+    "attack": 0.005,
     "release": 0.7,
-    "hold": 1.0
+    "hold": 1,
+    "lead": 0.33
    },
    "pos": [
     1300,
@@ -889,6 +890,129 @@
     420,
     1420
    ]
+  },
+  {
+   "id": "megaColor",
+   "type": "Color",
+   "name": "Mega fans colour (blue-purple)",
+   "pos": [
+    1300,
+    2250
+   ],
+   "params": {
+    "r": 0.35,
+    "g": 0.2,
+    "b": 1.0
+   }
+  },
+  {
+   "id": "setupMega",
+   "type": "Setup",
+   "name": "Setup: mega fan lasers",
+   "pos": [
+    1630,
+    2150
+   ],
+   "params": {
+    "on": 1,
+    "intro": 0,
+    "build": 0,
+    "drop": 1,
+    "breakdown": 0,
+    "normal": 0,
+    "outro": 0
+   }
+  },
+  {
+   "id": "megaDrop",
+   "type": "DropHit",
+   "name": "Big drops (camera hit)",
+   "pos": [
+    1000,
+    2400
+   ],
+   "params": {
+    "decay": 0.6
+   }
+  },
+  {
+   "id": "megaHit",
+   "type": "Expression",
+   "name": "Camera hit: confident drops only",
+   "pos": [
+    1300,
+    2400
+   ],
+   "params": {
+    "expr": "a * smoothstep(0.5, 0.8, b / max(a, 0.001))"
+   }
+  },
+  {
+   "id": "megaLeft",
+   "type": "SkyLaser",
+   "name": "Mega fan: left rim",
+   "pos": [
+    1960,
+    2150
+   ],
+   "params": {
+    "from": 1,
+    "scan": 1,
+    "onVista": 1,
+    "planeRoll": 90,
+    "scanSpread": 80,
+    "scanSpreadPeak": 80,
+    "scanLines": 16,
+    "scanBright": 0.15,
+    "flicker": 0.05,
+    "sweep": 70,
+    "sweepSpeed": 0.06,
+    "peakWider": 0,
+    "peakFaster": 0,
+    "drift": 0,
+    "width": 0.03,
+    "glow": 6,
+    "hit": 4,
+    "reach": 1,
+    "fade": 0,
+    "seed": 21,
+    "rigs": "0.498,0.294,80,-25,0",
+    "intensity": 1.4
+   }
+  },
+  {
+   "id": "megaRight",
+   "type": "SkyLaser",
+   "name": "Mega fan: right rim",
+   "pos": [
+    1960,
+    2400
+   ],
+   "params": {
+    "from": 1,
+    "scan": 1,
+    "onVista": 1,
+    "planeRoll": 90,
+    "scanSpread": 80,
+    "scanSpreadPeak": 80,
+    "scanLines": 16,
+    "scanBright": 0.15,
+    "flicker": 0.05,
+    "sweep": 70,
+    "sweepSpeed": 0.06,
+    "peakWider": 0,
+    "peakFaster": 0,
+    "drift": 0,
+    "width": 0.03,
+    "glow": 6,
+    "hit": 4,
+    "reach": 1,
+    "fade": 0,
+    "seed": 22,
+    "rigs": "0.585,0.17,-80,-25,0",
+    "intensity": 1.4,
+    "flare": 6
+   }
   }
  ],
  "wires": [
@@ -1770,6 +1894,76 @@
    "to": [
     "sunAz",
     "a"
+   ]
+  },
+  {
+   "from": [
+    "megaColor",
+    "color"
+   ],
+   "to": [
+    "megaLeft",
+    "color"
+   ]
+  },
+  {
+   "from": [
+    "megaColor",
+    "color"
+   ],
+   "to": [
+    "megaRight",
+    "color"
+   ]
+  },
+  {
+   "from": [
+    "setupMega",
+    "level"
+   ],
+   "to": [
+    "megaLeft",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "setupMega",
+    "level"
+   ],
+   "to": [
+    "megaRight",
+    "level"
+   ]
+  },
+  {
+   "from": [
+    "megaDrop",
+    "hit"
+   ],
+   "to": [
+    "megaHit",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "megaDrop",
+    "strength"
+   ],
+   "to": [
+    "megaHit",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "megaHit",
+    "value"
+   ],
+   "to": [
+    "megaRight",
+    "camHit"
    ]
   }
  ]

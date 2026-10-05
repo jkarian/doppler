@@ -65,6 +65,10 @@ export interface SkyLaserOut {
   sweep: number; // degrees each scanning plane swings to either side (across its plane)
   sweepPhase: number; // cycles so far, including the extra speed from peaks
   sweepBoost: number; // multiplier on sweep from the current peak
+  planeRoll: number; // scanning planes: < 0 random roll per step; else degrees from level (0: the fan spreads sideways)
+  onVista: number; // > 0.5: rigs stand on the vista plate (behind the near layers), not on the nearest rock
+  camHit: number; // 0..1: swings each plane toward the camera, so it sweeps through the viewer
+  flare: number; // strength of the lens flare when a plane passes through the camera
 }
 
 export interface LaserOut {
@@ -334,6 +338,7 @@ const defs: NodeDef[] = [
       { name: "attack", default: 0.03, kind: "const", min: 0.005, max: 1, step: 0.005, doc: "seconds to rise" },
       { name: "release", default: 0.6, kind: "const", min: 0.02, max: 5, step: 0.01, doc: "seconds to fall" },
       { name: "hold", default: 0, kind: "const", min: 0, max: 5, step: 0.05, doc: "seconds a peak stays at its top before it starts to fall" },
+      { name: "lead", default: 0, kind: "const", min: 0, max: 2, step: 0.01, doc: "seconds to ramp up before the hit, so the peak is full exactly on it (the track is known ahead)" },
     ],
     outputs: ["peak", "push"],
     init: (c, ctx) => {
@@ -371,6 +376,20 @@ const defs: NodeDef[] = [
         else e += (target - e) * down;
         peak[k] = e;
         push[k] = (k ? push[k - 1] : 0) + e / rate;
+      }
+      // Lead: ramp up before each hit (eased), so the top lands exactly on it instead of rising after it.
+      const lead = Math.round(Math.max(0, num(c.lead)) * rate);
+      if (lead > 0) {
+        const base = peak.slice();
+        for (let k = 0; k < n; k++) {
+          let v = base[k];
+          for (let s = 1; s <= lead && k + s < n; s++) {
+            const x = 1 - s / (lead + 1);
+            v = Math.max(v, base[k + s] * x * x * (3 - 2 * x));
+          }
+          peak[k] = v;
+          push[k] = (k ? push[k - 1] : 0) + v / rate;
+        }
       }
       return { rate, peak, push };
     },
@@ -796,6 +815,10 @@ const defs: NodeDef[] = [
       { name: "peakWider", default: 2, min: 0, max: 10, step: 0.1, doc: "at a full peak the swings are this many times wider again" },
       { name: "peakFaster", default: 3, min: 0, max: 20, step: 0.1, doc: "extra swings per second at a full peak" },
       { name: "level", default: 1, min: 0, max: 1, step: 0.01, doc: "0..1: wire a Setup node's level here to switch this on and off with the song" },
+      { name: "planeRoll", default: -1, min: -1, max: 180, step: 1, kind: "const", doc: "scanning planes: -1 random each step; else degrees from level (0: a flat fan spreading sideways, sweeping up and down)" },
+      { name: "onVista", default: 0, min: 0, max: 1, step: 1, kind: "const", doc: "1: rigs stand out in the vista (behind the cave and pillars), on the plateau rims" },
+      { name: "camHit", default: 0, min: 0, max: 1, step: 0.01, doc: "0..1: swings the planes toward the camera, so they sweep through the viewer (wire a moment here)" },
+      { name: "flare", default: 0, min: 0, max: 20, step: 0.1, doc: "lens flare when a plane sweeps through the camera" },
     ],
     outputs: [],
     eval: (i, ctx) => {
@@ -822,6 +845,7 @@ const defs: NodeDef[] = [
         // Speed changes are integrated (push is the peaks added up over time), so a faster swing never jumps.
         sweep: Math.max(0, num(i.sweep)), sweepPhase: Math.max(0, num(i.sweepSpeed)) * ctx.t + Math.max(0, num(i.peakFaster)) * num(i.peakPush),
         sweepBoost: 1 + Math.max(0, num(i.peakWider)) * clamp(num(i.peak), 0, 1),
+        planeRoll: num(i.planeRoll), onVista: num(i.onVista), camHit: clamp(num(i.camHit), 0, 1), flare: Math.max(0, num(i.flare)),
       });
       return {};
     },

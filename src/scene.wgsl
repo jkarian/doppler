@@ -129,6 +129,31 @@ fn lensFlare(frag: vec2f) -> vec3f {
   return c * u.flare;
 }
 
+// A laser plane sweeping through the camera: the source blazes, a starburst and a wash of its colour over the
+// picture, as when a club laser crosses your eyes. Its strength (lasers.flare) is worked out on the CPU.
+fn laserFlare(frag: vec2f) -> vec3f {
+  let k = lasers.flare;
+  if (k <= 0.0) { return vec3f(0.0); }
+  let L = lasers.l[lasers.flareFixture];
+  let pc = L.origin - u.camPos;
+  let tanXY = vec2f(u.tanHalfFov * u.aspect, u.tanHalfFov);
+  let q = pc.xy / (pc.z * tanXY) + u.camPos.xy / (u.pivotZ * tanXY);
+  let src = (q - u.center) * u.viewScale;
+  let p = vec2f(frag.x / u.screen.x * 2.0 - 1.0, 1.0 - frag.y / u.screen.y * 2.0);
+  let a = vec2f(u.screen.x / u.screen.y, 1.0);
+  let d = (p - src) * a;
+  let r = length(d);
+  let ang = atan2(d.y, d.x);
+  let white = mix(L.color, vec3f(1.0), 0.7);
+  var c = white * exp(-r * r * 400.0) * 3.0 + L.color * exp(-r * 6.0) * 0.6;
+  // Long horizontal streak (anamorphic) and a starburst.
+  c += mix(L.color, vec3f(1.0), 0.4) * exp(-abs(d.y) * 120.0) * exp(-abs(d.x) * 1.2) * 0.8;
+  c += L.color * (pow(abs(cos(ang * 3.0)), 80.0) + pow(abs(cos(ang * 3.0 + 0.52)), 120.0) * 0.6) * exp(-r * 2.0) * 0.7;
+  // The whole picture washes with the laser's colour.
+  c += L.color * 0.12;
+  return c * k;
+}
+
 // The light at a surface point: direction toward it, distance, and how much of it arrives (cone x falloff).
 struct LightHit {
   l: vec3f,
@@ -204,7 +229,7 @@ struct Laser {
   hit: f32, maxLen: f32, glow: f32, reach: f32,  // glow: in beam widths; reach: 0..1 into the vista
 };
 struct Lasers {
-  count: u32, pad0: u32, pad1: u32, pad2: u32,
+  count: u32, flareFixture: u32, flare: f32, pad2: u32,  // flare: a scanning plane sweeping through the camera
   l: array<Laser, 16>,
   beams: array<vec4f, 768>,        // (laser * 24 + beam) * 2: [origin, length], [direction, curtain half-angle or -1 = ground rig]
 };
@@ -264,6 +289,16 @@ fn distanceFade(d: f32) -> f32 {
 fn laserNear(t: f32) -> f32 {
   if (u.sunC.y <= 0.0) { return 1.0; }
   return clamp(pow(u.sunC.y / max(t, 1e-3), 0.6), 0.15, 2.2);
+}
+
+// Where a laser plane cuts the rock: a line of real width (sunC.z, scene units: about 3 inches on true-scale scenes),
+// so it thins with distance, but never drawn thinner than about a pixel; below that it dims instead. Returns
+// (width to draw, brightness factor). Without a real width (old scenes): `fallback`, full brightness.
+fn lineWidth(dist: f32, fallback: f32) -> vec2f {
+  if (u.sunC.z <= 0.0) { return vec2f(fallback, 1.0); }
+  let pixel = 0.6 * 2.0 * u.tanHalfFov / (u.screen.y * u.viewScale.y) * dist;
+  let w = max(u.sunC.z, pixel);
+  return vec2f(w, u.sunC.z / w);
 }
 
 fn laserLight(p: vec3f, sky: bool) -> LaserLight {
@@ -391,8 +426,8 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
         let a = atan2(dot(rel, L.right), dot(rel, L.aim));
         if (abs(a) <= L.halfSpread && length(rel) <= fanLength(li, n, a, L.halfSpread) * 1.03 + 0.02) {
           let off = dot(rel, L.normal);
-          let thick = 0.0025 * distance(p, cam) + 0.002;
-          r += min(L.sheet, 2.0) * L.hit * (2.5 * exp(-pow(off / thick, 2.0)) + 0.3 * exp(-pow(off / (thick * 8.0), 2.0)));
+          let lw = lineWidth(distance(p, cam), 0.0025 * distance(p, cam) + 0.002);
+          r += min(L.sheet, 2.0) * L.hit * lw.y * (2.5 * exp(-pow(off / lw.x, 2.0)) + 0.3 * exp(-pow(off / (lw.x * 4.0), 2.0)));
         }
       }
     }
@@ -807,6 +842,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   let air = smoothstep(u.far * 0.02, u.far * 0.12, z);
   color += u.lightColor * (u.rays * air * textureSampleLevel(raysTex, samp, uv, 0.0).r);
   if (u.flare > 0.0) { color += lensFlare(frag.xy) * u.lightColor; }
+  color += laserFlare(frag.xy);
   // Lasers and the scan light the rock: they multiply its colour (with a little floor so dark rock
   // still shows the line), then go through the cap with everything else.
   var las = LaserLight(vec3f(0.0), vec3f(0.0));

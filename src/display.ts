@@ -204,6 +204,13 @@ async function main() {
       })()
     : depthTex;
   // Layers behind: textures (same sizes and formats as the main layer's).
+  // The last layer behind (the vista plate, when there is one): rigs can stand out there (SkyLaser onVista).
+  const vistaDepth = bgFilesList.length ? new Float32Array(bgFilesList[bgFilesList.length - 1][3]) : depth;
+  const vistaDepthAt = (u: number, v: number) => {
+    const x = Math.min(W - 1, Math.max(0, Math.round(u * W - 0.5)));
+    const y = Math.min(H - 1, Math.max(0, Math.round(v * H - 0.5)));
+    return vistaDepth[y * W + x];
+  };
   const bgTexs = bgFilesList.map((bgFiles) => {
     const d = device.createTexture({ size: [W, H], format: "r32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     device.queue.writeTexture({ texture: d }, new Float32Array(bgFiles[3]), { bytesPerRow: W * 4 }, [W, H]);
@@ -272,6 +279,7 @@ async function main() {
   const LASER_FLOATS = 4 + LASER_FIXTURES * 24 + LASER_FIXTURES * 24 * 2 * 4;
   const laserData = new Float32Array(LASER_FLOATS);
   const laserCount = new Uint32Array(laserData.buffer, 0, 1);
+  const laserHeader = new Uint32Array(laserData.buffer, 0, 4); // [count, flare fixture, (f32) flare strength, -]
   const laserBuf = device.createBuffer({ size: LASER_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   // Nook lights: count + 16 lights x 8 floats. Layout matches `Nooks` in scene.wgsl.
   const NOOK_FLOATS = 4 + 16 * 8;
@@ -374,6 +382,7 @@ async function main() {
     const y = Math.min(H - 1, Math.max(0, Math.round(v * H - 0.5)));
     return depth[y * W + x];
   };
+  const depthAtMain = depthAt;
   const viewPos = (u: number, v: number, z = depthAt(u, v)): Vec3 => [
     (u * 2 - 1) * tanHalfFov * aspect * z,
     (1 - v * 2) * tanHalfFov * z,
@@ -440,6 +449,8 @@ async function main() {
   const beamRefZ = pivotZ;
   // Where laser brightness is as tuned (nearer: brighter, further: fainter): about where the rigs stand.
   const laserRefZ = info.metersPerUnit ? 200 / info.metersPerUnit : pct(0.8);
+  // Width of the line a laser plane draws on the rock: about 3 inches on true-scale scenes (0: the old look).
+  const laserLineW = info.metersPerUnit ? 0.076 / info.metersPerUnit : 0;
   // Depth of the rock around the camera: the sun's shadows treat anything this near as part of the cave.
   const caveDepth = pct(0.7) * 1.5;
   // Parallax range: how much more a near rock moves than the pivot, per unit of camera travel.
@@ -1114,7 +1125,7 @@ async function main() {
       ...skyUniforms(),
       look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, graphOut.sun?.caveDepth ?? 15,
       ...UP, bgBindGroups.length,
-      graphOut.sun?.terminator ?? 0, laserRefZ, 0, 0,
+      graphOut.sun?.terminator ?? 0, laserRefZ, laserLineW, 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     uniforms[55] = graphOut.sun?.detailBump ?? 0; // scanLines.w: fine rock relief from the photo's texture
@@ -1214,7 +1225,7 @@ async function main() {
   // Lasers: origin, fan basis, and each beam's length to the first rock it hits (marched through the
   // depth map, the same "solid behind the surface" rule as the sun's shadows).
   const rad = Math.PI / 180;
-  const beamLength = (o: Vec3, d: Vec3, maxLen: number): number => {
+  const beamLength = (o: Vec3, d: Vec3, maxLen: number, depthAt = depthAtMain): number => {
     const steps = 160;
     let prev = 0;
     for (let k = 1; k <= steps; k++) {
@@ -1272,30 +1283,43 @@ async function main() {
     let li = first;
     for (const [bi, q] of (S.rigs ?? []).entries()) {
       if (li >= LASER_FIXTURES) break;
-      const beam = rigBeam(S, q, bi, step);
+      const onVista = S.onVista > 0.5;
+      const beam = onVista ? { o: viewPos(q[0], q[1], vistaDepthAt(q[0], q[1]) * 0.995), d: worldDir(q[2] * rad, q[3] * rad) } : rigBeam(S, q, bi, step);
       const o = beam.o;
       let d = beam.d;
       const r = seeded(S.seed * 7907 + step * 53 + bi * 29);
-      const roll = Math.PI * r();
-      let right = normalize(cross([0, 1, 0], d));
+      // Roll: random per step, or fixed from level (0 = a flat fan spreading sideways, around true vertical).
+      const roll = S.planeRoll >= 0 ? S.planeRoll * rad : Math.PI * r();
+      let right = normalize(cross(S.planeRoll >= 0 ? UP : [0, 1, 0], d));
       if (!Number.isFinite(right[0])) right = [1, 0, 0];
       const up = cross(d, right);
       right = normalize(right.map((x, j) => x * Math.cos(roll) + up[j] * Math.sin(roll)) as Vec3);
       // The plane swings across itself (around its sideways axis), each rig out of step: wider and faster on peaks.
-      const swing = S.sweep * S.sweepBoost * rad * Math.sin(2 * Math.PI * S.sweepPhase + bi * 1.9);
       const across = normalize(cross(d, right));
+      let swing = S.sweep * S.sweepBoost * rad * Math.sin(2 * Math.PI * S.sweepPhase + bi * 1.9);
+      // Camera hit: swing toward the angle at which the plane passes through the camera.
+      const cam = camPos(time);
+      const toCam = normalize([cam[0] - o[0], cam[1] - o[1], cam[2] - o[2]]);
+      if (S.camHit > 0) swing += (Math.atan2(dot(toCam, across), dot(toCam, d)) - swing) * S.camHit;
       d = normalize(d.map((x, j) => x * Math.cos(swing) + across[j] * Math.sin(swing)) as Vec3);
       const normal = normalize(cross(d, right));
       const half = (S.scanSpread / 2) * rad;
       const n = S.scanLines;
       const flick = 1 - S.flicker * Math.random();
+      // Lens flare: the plane sweeping through the camera, inside the fan's spread (bright for a fraction of a degree).
+      if (S.flare > 0 && brightness > 0) {
+        const off = Math.asin(Math.min(1, Math.abs(dot(toCam, normal))));
+        const inFan = Math.abs(Math.atan2(dot(toCam, right), dot(toCam, d))) <= half ? 1 : 0;
+        const k = S.flare * brightness * inFan * Math.exp(-((off / (0.6 * rad)) ** 2));
+        if (k > laserFlare.k) Object.assign(laserFlare, { k, li, o });
+      }
       // sheet > 1 marks a scanned plane for the shader: 1 + the plane's brightness.
       laserData.set([...o, n, ...d, 1 + S.scanBright, ...right, half, ...normal, brightness * flick, ...(S.color as Vec3), S.width * rad * beamRefZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
       for (let k = 0; k < n; k++) {
         const a = -half + (2 * half * k) / (n - 1);
         const dk = normalize(d.map((x, j) => x * Math.cos(a) + right[j] * Math.sin(a)) as Vec3);
         // The middle line also marks the rig itself (a small bright source).
-        laserData.set([...o, beamLength(o, dk, maxLen), ...dk, k === n >> 1 ? -1 : 0], beamSlot(li, k));
+        laserData.set([...o, beamLength(o, dk, maxLen, onVista ? vistaDepthAt : depthAtMain), ...dk, k === n >> 1 ? -1 : 0], beamSlot(li, k));
       }
       li++;
     }
@@ -1341,8 +1365,11 @@ async function main() {
     }
   };
   const beamSlot = (li: number, bi: number) => 4 + LASER_FIXTURES * 24 + (li * 24 + bi) * 8;
+  // The strongest laser lens flare this frame: which fixture, how strong, where its source is.
+  const laserFlare = { k: 0, li: 0, o: [0, 0, 0] as Vec3 };
   const writeLasers = (list: NonNullable<RenderOut["lasers"]>, sky: NonNullable<RenderOut["skyLasers"]>) => {
     laserData.fill(0);
+    Object.assign(laserFlare, { k: 0, li: 0 });
     const n = Math.min(LASER_FIXTURES, list.length);
     const maxLen = info.far * 1.5;
     for (let li = 0; li < n; li++) {
@@ -1411,6 +1438,8 @@ async function main() {
       }
     }
     laserCount[0] = used;
+    laserHeader[1] = laserFlare.li;
+    laserData[2] = laserFlare.k;
     device.queue.writeBuffer(laserBuf, 0, laserData);
   };
 
@@ -1527,6 +1556,7 @@ async function main() {
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
+const dot = (a: Vec3, b: number[]): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const normalize = (a: Vec3): Vec3 => {
   const l = Math.hypot(...a);
