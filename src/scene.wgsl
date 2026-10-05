@@ -931,10 +931,9 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
     let side = cross(up, fwd);
     // The river's course here (tools/river_flow.py: the banks' directions averaged), an angle on the ground in the
     // vista layer's normal alpha; pointed downstream, toward us. Streaks run along it, across is sideways to it.
-    let th = textureSampleLevel(normalTex, samp, uv, 0.0).a * 3.14159265;
+    let th = textureSampleLevel(normalTex, samp, uv, 0.0).a * 6.2831853;  // downstream, full circle
     let g = vec2f(dot(p, side), dot(p, fwd));
-    var dirG = vec2f(cos(th), sin(th));
-    if (dot(dirG, vec2f(dot(u.camPos, side), dot(u.camPos, fwd)) - g) < 0.0) { dirG = -dirG; }
+    let dirG = vec2f(cos(th), sin(th));
     let e = u.waterC.y * 0.15;
     let h0 = waterHeight(g, dirG);
     let hx = waterHeight(g + vec2f(e, 0.0), dirG) - h0;
