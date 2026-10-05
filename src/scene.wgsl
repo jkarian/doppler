@@ -42,7 +42,7 @@ struct Uniforms {
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
   sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth, cave rock solid depth (fractions of distance)
   up: vec4f,           // true vertical in scene space (the photo's camera looks down a little); w: layers behind the main one
-  sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), laser reference distance, -, -
+  sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), laser reference distance, laser line width, time (s)
 };
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
@@ -291,6 +291,33 @@ fn laserNear(t: f32) -> f32 {
   return clamp(pow(u.sunC.y / max(t, 1e-3), 0.6), 0.15, 2.2);
 }
 
+// Uneven air: laser light in the air shows the haze it passes through, wisps of denser and thinner air drifting
+// slowly. Value noise in world space, two octaves (scaled to the scene: ~2 m and ~10 m wisps on true-scale scenes).
+// Evaluated only where a beam or sheet actually shows on a pixel.
+fn hash3(p: vec3f) -> f32 {
+  // Integer hash of the lattice point (stable at canyon-scale coordinates, where sin-based hashes lose precision
+  // and shimmer).
+  var h = bitcast<vec3u>(vec3i(p));
+  h = h * vec3u(1664525u, 22695477u, 1103515245u) + vec3u(1013904223u, 1u, 12345u);
+  h.x += h.y * h.z; h.y += h.z * h.x; h.z += h.x * h.y;
+  h = h ^ (h >> vec3u(16u));
+  h.x += h.y * h.z;
+  return f32(h.x & 0xffffffu) / 16777216.0;
+}
+fn vnoise(p: vec3f) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let w = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash3(i), hash3(i + vec3f(1, 0, 0)), w.x), mix(hash3(i + vec3f(0, 1, 0)), hash3(i + vec3f(1, 1, 0)), w.x), w.y),
+             mix(mix(hash3(i + vec3f(0, 0, 1)), hash3(i + vec3f(1, 0, 1)), w.x), mix(hash3(i + vec3f(0, 1, 1)), hash3(i + vec3f(1, 1, 1)), w.x), w.y), w.z);
+}
+fn airDensity(q: vec3f) -> f32 {
+  let s = select(u.pivotZ * 0.03, 1.0, u.sunC.z > 0.0);  // metres on true-scale scenes
+  let drift = vec3f(0.25, 0.04, 0.12) * s * u.sunC.w;     // a breeze: slow drift through the canyon
+  let n = 0.65 * vnoise((q + drift) / (10.0 * s)) + 0.35 * vnoise((q + drift * 1.7) / (2.2 * s) + 17.0);
+  return mix(0.35, 1.55, smoothstep(0.2, 0.8, n));
+}
+
 // Where a laser plane cuts the rock: a line of real width (sunC.z, scene units: about 3 inches on true-scale scenes),
 // so it thins with distance, but never drawn thinner than about a pixel; below that it dims instead. Returns
 // (width to draw, brightness factor). Without a real width (old scenes): `fallback`, full brightness.
@@ -373,7 +400,8 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       let edgeLine = bi == 0u || bi + 1u == n;
       let drawn = !scanned || edgeLine;
       // The air veils the far parts of a beam like the far land (aerial perspective).
-      g += select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen * exp(-u.hazeBeta * t) * laserNear(t);
+      let gb = select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen * exp(-u.hazeBeta * t) * laserNear(t);
+      if (gb > 1e-4) { g += gb * airDensity(cam + t * v); }
       // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
       if (db.w < 0.0) {
         let to = dot(o - cam, v);
@@ -413,10 +441,10 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
             // distance as the beams.
             let e = abs(a) / max(L.halfSpread, 1e-4);
             let dwell = 0.5 + 0.5 * min(4.0, inverseSqrt(max(1.0 - e * e, 1e-3)));
-            g += (L.sheet - 1.0) * 0.06 * dwell * through * distanceFade(tp) * laserNear(tp);
+            g += (L.sheet - 1.0) * 0.06 * dwell * through * distanceFade(tp) * laserNear(tp) * airDensity(cam + tp * v);
           } else {
             // Faint: light scattered by haze. The contour lines and edges carry the shape.
-            g += L.sheet * 0.012 * through * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp) * reachFade(tp, L.reach) * laserNear(tp);
+            g += L.sheet * 0.012 * through * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp) * reachFade(tp, L.reach) * laserNear(tp) * airDensity(cam + tp * v);
           }
         }
       }

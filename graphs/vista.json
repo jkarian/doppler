@@ -962,11 +962,11 @@
     "planeRoll": 90,
     "scanSpread": 80,
     "scanSpreadPeak": 80,
-    "scanLines": 16,
+    "scanLines": 24,
     "scanBright": 0.15,
     "flicker": 0.05,
     "sweep": 70,
-    "sweepSpeed": 0.06,
+    "sweepSpeed": 0.08,
     "peakWider": 0,
     "peakFaster": 0,
     "drift": 0,
@@ -976,8 +976,9 @@
     "reach": 1,
     "fade": 0,
     "seed": 21,
-    "rigs": "0.498,0.294,80,-25,0",
-    "intensity": 1.4
+    "rigs": "0.498,0.294,80,-8,0",
+    "intensity": 1.4,
+    "sweepOneWay": 1
    }
   },
   {
@@ -995,11 +996,11 @@
     "planeRoll": 90,
     "scanSpread": 80,
     "scanSpreadPeak": 80,
-    "scanLines": 16,
+    "scanLines": 24,
     "scanBright": 0.15,
     "flicker": 0.05,
     "sweep": 70,
-    "sweepSpeed": 0.06,
+    "sweepSpeed": 0.08,
     "peakWider": 0,
     "peakFaster": 0,
     "drift": 0,
@@ -1009,9 +1010,10 @@
     "reach": 1,
     "fade": 0,
     "seed": 22,
-    "rigs": "0.585,0.17,-80,-25,0",
+    "rigs": "0.585,0.17,-80,-8,0",
     "intensity": 1.4,
-    "flare": 6
+    "flare": 6,
+    "sweepOneWay": 1
    }
   }
  ],
