@@ -1076,11 +1076,11 @@
     1250
    ],
    "params": {
-    "speed": 5,
-    "size": 5,
-    "foam": 1.0,
-    "ripple": 0.5,
-    "sheen": 1.0,
+    "speed": 9,
+    "size": 4,
+    "foam": 1.6,
+    "ripple": 0.6,
+    "sheen": 0.5,
     "glints": 1,
     "shininess": 120
    }

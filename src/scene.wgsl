@@ -332,12 +332,35 @@ fn airDensity(q: vec3f) -> f32 {
 
 // Flowing water (the river in the vista plate): a ripple height field in world space, streaked along the flow and
 // moving downstream (toward the camera here), whose slopes make the water's normal map.
-fn waterHeight(q: vec2f) -> f32 {
-  let t = u.sunC.w * u.waterC.x;
-  // Long streaks along the flow (q.y), fine across it; a second, faster finer layer for chop.
-  let a = vnoise(vec3f(q.x / u.waterC.y, (q.y + t) / (u.waterC.y * 4.0), 0.5));
-  let b = vnoise(vec3f(q.x / (u.waterC.y * 0.35), (q.y + t * 1.6) / (u.waterC.y * 1.2), 7.3));
-  return 0.65 * a + 0.35 * b;
+fn waterLayers(q: vec2f) -> f32 {
+  // Ripples in fixed world axes (never rotated, so no swirling): warped so they curl like white water; a fine chop
+  // layer and a broad one for foam patches.
+  let sz = u.waterC.y;
+  let w = vec2f(vnoise(vec3f(q / (sz * 2.5), 11.0)), vnoise(vec3f(q / (sz * 2.5) + 5.2, 19.0))) - 0.5;
+  let r = q + w * sz * 2.0;
+  return 0.45 * vnoise(vec3f(r / sz, 0.5)) + 0.25 * vnoise(vec3f(r / (sz * 0.35), 7.3)) + 0.3 * vnoise(vec3f(r / (sz * 3.0), 3.1));
+}
+
+fn waterStreak(q: vec2f, dir: vec2f) -> f32 {
+  // Streaks along the flow: the ripples blurred along it.
+  let sz = u.waterC.y;
+  var h = 0.0;
+  for (var k = 0; k < 4; k++) { h += waterLayers(q + dir * (f32(k) - 1.5) * sz * 0.9); }
+  return h * 0.25;
+}
+
+// Flowing water (the river in the vista plate): a flow map. The ripple field slides along the river's course (dir, on
+// the ground) at speed; two copies half a cycle apart cross-fade so the sliding never stretches it over time.
+fn waterHeight(q: vec2f, dir: vec2f) -> f32 {
+  let period = 1.6;
+  let ph = u.sunC.w / period;
+  let fa = fract(ph);
+  let fb = fract(ph + 0.5);
+  let wa = 1.0 - abs(2.0 * fa - 1.0);
+  let travel = period * u.waterC.x;
+  let ha = waterStreak(q - dir * fa * travel, dir);
+  let hb = waterStreak(q - dir * fb * travel + vec2f(13.7, 5.1) * u.waterC.y, dir);
+  return mix(hb, ha, wa);
 }
 
 // Where a laser plane cuts the rock: a line of real width (sunC.z, scene units: about 3 inches on true-scale scenes),
@@ -906,15 +929,22 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
     let up = u.up.xyz;
     let fwd = normalize(vec3f(0.0, 0.0, 1.0) - up * up.z);  // level, into the scene: the river flows toward us (-fwd)
     let side = cross(up, fwd);
-    let q = vec2f(dot(p, side), dot(p, fwd));
+    // The river's course here (tools/river_flow.py: the banks' directions averaged), an angle on the ground in the
+    // vista layer's normal alpha; pointed downstream, toward us. Streaks run along it, across is sideways to it.
+    let th = textureSampleLevel(normalTex, samp, uv, 0.0).a * 3.14159265;
+    let g = vec2f(dot(p, side), dot(p, fwd));
+    var dirG = vec2f(cos(th), sin(th));
+    if (dot(dirG, vec2f(dot(u.camPos, side), dot(u.camPos, fwd)) - g) < 0.0) { dirG = -dirG; }
     let e = u.waterC.y * 0.15;
-    let h0 = waterHeight(q);
-    let hx = waterHeight(q + vec2f(e, 0.0)) - h0;
-    let hy = waterHeight(q + vec2f(0.0, e)) - h0;
+    let h0 = waterHeight(g, dirG);
+    let hx = waterHeight(g + vec2f(e, 0.0), dirG) - h0;
+    let hy = waterHeight(g + vec2f(0.0, e), dirG) - h0;
     let nw = normalize(up - (side * hx + fwd * hy) * (u.waterD.z / 0.15));
     let vdir = normalize(u.camPos - p);
-    // Rushing: foam on the crests.
-    color *= mix(1.0, 0.75 + u.waterD.x * smoothstep(0.45, 0.85, h0), water);
+    // Rushing: white foam on the crests, added (the water never goes darker than the photo: no debossed band).
+    let crest = smoothstep(0.47, 0.62, h0);  // the streak blur narrows the range
+    let foamLight = u.baseDim * 1.5 + dot(light, vec3f(0.3333)) * 0.6;
+    color += water * u.waterD.x * crest * vec3f(0.88, 0.93, 0.96) * foamLight;
     // Sheen: the sky reflected, Fresnel (Schlick, water ~2%) so it grows toward grazing angles.
     let r = reflect(-vdir, nw);
     let fres = 0.02 + 0.98 * pow(1.0 - max(dot(nw, vdir), 0.0), 5.0);
@@ -923,7 +953,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
     // Glints: Blinn-Phong highlight of the sun (or spot) on the rippled surface, in its shadow only where lit.
     let hv = normalize(hit.l + vdir);
     let spec = pow(max(dot(nw, hv), 0.0), u.waterD.y) * hit.amount * shadow;
-    color += water * u.waterC.w * spec * u.lightColor * u.intensity;
+    color += water * u.waterC.w * spec * u.lightColor * min(u.intensity, 1.0) * 0.6;
   }
   // Aerial perspective: far land fades toward the sky's own colour at its height in the picture (the air between
   // glows like the sky behind it), so distant ridges sit back instead of reading as black cut-outs against the
