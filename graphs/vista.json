@@ -880,9 +880,9 @@
   {
    "id": "sunAz",
    "type": "Expression",
-   "name": "Sun direction: into the gap at the drop, back right as it fades",
+   "name": "Sun direction: straight into the gap (it only rises and sets)",
    "params": {
-    "expr": "40 - 38 * a"
+    "expr": "2"
    },
    "pos": [
     420,
