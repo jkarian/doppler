@@ -52,6 +52,10 @@ NORMAL_BAND_PX = 4  # and their normals come from this much further in (edge nor
 MARKUP_HOLE_PX = 20_000  # unpainted spots in the cave markup smaller than this (scene pixels) count as cave
 DEHAZE_MIN_T = 0.55  # the plate's dehazing removes at most this much of the haze (1 - this)
 MOUNTAIN_M = 6000.0  # land beyond this counts as the distant mountains (--mountains)
+MOUNTAIN_TAPER_PX = 800  # the sky's drop eases out over this far beyond the mountains (a sudden change bent the clouds)
+MOUNTAIN_CUT_PX = 10  # the mountains sink behind a level line this far above the plain at their feet
+MOUNTAIN_FADE = 0.35  # the sunk mountains fade into the plain's haze over this share of what stays visible
+MOUNTAIN_EDGE_PX = 12  # the depth's outline of the near rock is re-decided by colour over this wide a strip
 KEPT_ERODE_PX = 3  # the kept strip loses this much (scene pixels) to the near rock: its rim moves with it
 
 
@@ -161,37 +165,16 @@ def main() -> None:
         _, (iy, ix) = ndi.distance_transform_edt(~land, return_indices=True)
         z_plate[hole] = z_plate[iy, ix][hole]
     if args.mountains < 0.999:
-        # Lower the distant mountains: squash each column's mountain band (land beyond MOUNTAIN_M) onto its base line
-        # and move the sky down over the freed rows; then build everything again from the new plate.
-        mtn = ndi.binary_opening(land & (z_plate > MOUNTAIN_M), iterations=2)
-        new = plate.copy()
-        cols = np.nonzero(mtn.any(0))[0]
-        tops = np.full(W, -1)
-        bots = np.full(W, -1)
-        for x in cols:
-            r = np.nonzero(mtn[:, x])[0]
-            tops[x], bots[x] = r.min(), r.max()
-        ok = tops >= 0
-        tops[ok] = ndi.median_filter(tops, 15)[ok]
-        bots[ok] = ndi.median_filter(bots, 15)[ok]
-        for x in np.nonzero(ok)[0]:
-            top, bot = int(tops[x]), int(bots[x])
-            h = bot - top + 1
-            nh = max(1, int(round(h * args.mountains)))
-            src = plate[top:bot + 1, x].astype(np.float32)
-            idx = np.linspace(0, h - 1, nh)
-            band = np.stack([np.interp(idx, np.arange(h), src[:, c]) for c in range(3)], -1)
-            new[bot - nh + 1:bot + 1, x] = band.round().astype(np.uint8)
-            shift = h - nh
-            rows = np.arange(0, bot - nh + 1)
-            new[rows, x] = plate[np.maximum(rows - shift, 0), x]
-        lowered = args.out / "plate_mountains.png"
+        # Lower the distant mountains: sink them behind the plain at their feet (shapes kept, nothing squashed), the
+        # sky coming down with them. Done here, after the depth fit, and the plate's depth, normals and masks move
+        # with it: rebuilding from the lowered plate lost the kept canyon's far end (its mountains no longer matched
+        # the photo), which refit the whole vista's depth and haze.
+        plate, warp, drop = lower_mountains(plate, z_plate, land, sky, args.mountains)
+        z_plate, n_plate = warp(z_plate), warp(n_plate)
+        sky, land, valid = warp(sky), warp(land), warp(valid)
         args.out.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(new).save(lowered)
-        print(f"  mountains scaled to {args.mountains:.2f} of their height ({ok.sum()} columns): rebuilding from {lowered}")
-        sys.argv = [a if a != str(args.plate) else str(lowered) for a in sys.argv]
-        sys.argv = [a for k, a in enumerate(sys.argv) if not (a == "--mountains" or (k and sys.argv[k - 1] == "--mountains"))]
-        return main()
+        Image.fromarray(plate).save(args.out / "plate_mountains.png")
+        print(f"  mountains sunk to {args.mountains:.2f} of their height ({drop:.0f} px down); plate in {args.out / 'plate_mountains.png'}")
     print(f"  log depth stretch {a:.2f}; MoGe far/near {np.exp(np.quantile(np.log(zm[land]), 0.98) - np.quantile(np.log(zm[land]), 0.02)):.0f}x, "
           f"mapped {np.quantile(z_plate[land], 0.02):.0f}-{np.quantile(z_plate[land], 0.98):.0f} m")
 
@@ -347,6 +330,80 @@ def main() -> None:
              "background": background if len(background) > 1 else background[0]}
     (args.out / "scene.json").write_text(json.dumps(scene, indent=2))
     print(f"wrote {args.out}")
+
+
+def lower_mountains(plate: np.ndarray, z_plate: np.ndarray, land: np.ndarray, sky: np.ndarray, scale: float):
+    """Sink the distant mountains (land beyond MOUNTAIN_M) so SCALE of their height shows above a level line at their
+    feet, the sky coming down with them. Their shapes stay as painted: squashing them per column made a jaggy
+    ridge and smeared the sky. Returns the new plate, a function that moves any other per-pixel array the same way,
+    and the drop in pixels."""
+    H, W = land.shape
+    near = land & (z_plate <= MOUNTAIN_M)
+    # The depth's outline runs a few pixels wide of the rock: along it, a pixel goes with whichever side (rock or far)
+    # its colour is closer to, measured against the local average of each side.
+    rgb = plate.astype(np.float32)
+    band = near & ~ndi.binary_erosion(near, iterations=MOUNTAIN_EDGE_PX)
+    def side_mean(m):
+        wgt = ndi.gaussian_filter(m.astype(np.float32), MOUNTAIN_EDGE_PX)
+        return np.stack([ndi.gaussian_filter(rgb[..., c] * m, MOUNTAIN_EDGE_PX) for c in range(3)], -1) / np.maximum(wgt, 1e-3)[..., None]
+    rock, far = side_mean(near & ~band), side_mean(~near)
+    farish = np.linalg.norm(rgb - far, axis=-1) < np.linalg.norm(rgb - rock, axis=-1)
+    near = near & ~(band & farish)
+    near = ndi.binary_opening(near, iterations=1) | ndi.binary_erosion(near, iterations=MOUNTAIN_EDGE_PX)
+    mtn = ndi.binary_opening(land & (z_plate > MOUNTAIN_M), iterations=2)
+    cols = mtn.any(0)
+    span = np.nonzero(cols)[0]
+    x0, x1 = span.min(), span.max()
+    xs = np.arange(W)
+    ys = np.arange(H)[:, None]
+    fill = lambda v: np.interp(xs, xs[~np.isnan(v)], v[~np.isnan(v)])
+    bot = fill(np.where(cols, np.where(mtn, ys, -1).max(0), np.nan).astype(np.float64))
+    top = fill(np.where(cols, np.where(mtn | (~sky & ~near), ys, H).min(0), np.nan).astype(np.float64))
+    # The line the mountains sink behind: a level horizon (the camera has no roll) just above the plain at their feet.
+    cut = np.full(W, np.quantile(bot[x0:x1 + 1], 0.25) - MOUNTAIN_CUT_PX)
+    peak = ndi.gaussian_filter1d(ndi.minimum_filter1d(top, 41), 25, mode="nearest")
+    inside = slice(x0, x1 + 1)
+    drop = float(np.median((cut - peak)[inside])) * (1 - scale)
+    dist = np.maximum(np.maximum(x0 - xs, xs - x1), 0)
+    w = 1 - np.clip(dist / MOUNTAIN_TAPER_PX, 0, 1)
+    w = (w * w * (3 - 2 * w))[None, :]
+    foot = float(np.median(peak[inside]))
+    y = np.arange(H, dtype=np.float32)[:, None]
+    src = y - drop * w * np.clip(y / foot, 0, 1)
+    src = np.where(y >= cut[None, :], y, src).astype(np.float32)
+    map_x = np.broadcast_to(xs[None, :].astype(np.float32), (H, W)).copy()
+    moved = cv2.remap(plate, map_x, src, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
+    bad = cv2.remap(near.astype(np.uint8), map_x, src, cv2.INTER_NEAREST) > 0
+    bad = ndi.binary_dilation(bad, iterations=2) & ~near
+    if bad.any():
+        # Spots whose source is near rock (under an overhang): the nearest good far pixel (an inpaint pulled the rock's
+        # red into the sky).
+        _, (iy, ix) = ndi.distance_transform_edt(bad | near, return_indices=True)
+        moved[bad] = moved[iy, ix][bad]
+    else:
+        iy = ix = None
+    vis = cut - peak - drop
+    fade_px = np.maximum(vis * MOUNTAIN_FADE, 1)[None, :]
+    row = int(round(cut[0])) + 2
+    hm = (~near[row]).astype(np.float32)
+    haze = ndi.gaussian_filter1d(rgb[row] * hm[:, None], 15, axis=0) / np.maximum(ndi.gaussian_filter1d(hm, 15), 1e-3)[:, None]
+    f = np.clip((y - (cut[None, :] - fade_px)) / fade_px, 0, 1) * (y < cut[None, :])
+    f = (f * f * (3 - 2 * f) * w)[..., None]
+    moved = moved * (1 - f) + haze[None, :, :] * f
+    a = np.maximum(ndi.gaussian_filter(near.astype(np.float32), 0.8), near)[..., None]
+    out = rgb * a + moved * (1 - a)
+    fill_y, fill_x = iy, ix
+    iy_src = np.clip(np.round(src), 0, H - 1).astype(np.int64)
+
+    def warp(arr: np.ndarray) -> np.ndarray:
+        """Move another per-pixel array (depth, normals, masks) the same way, nearest pixel."""
+        out_a = arr[iy_src, xs[None, :]]
+        if fill_y is not None:
+            out_a[bad] = out_a[fill_y, fill_x][bad]
+        out_a[near] = arr[near]
+        return out_a
+
+    return out.round().clip(0, 255).astype(np.uint8), warp, drop
 
 
 def cutout(mask: np.ndarray):
