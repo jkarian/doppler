@@ -224,12 +224,15 @@ async function main() {
   const code = await (await fetch(new URL("./scene.wgsl", import.meta.url))).text();
   const module = device.createShaderModule({ code });
   // Depth pre-pass (every layer, cut-outs see-through), then shading of only the surface that won each pixel.
+  // 4x multisampling for the scene pass: anti-aliased cut-out outlines (alpha to coverage) and mesh edges.
+  const MSAA = 4;
   const depthPipeline = device.createRenderPipeline({
     layout: "auto",
     vertex: { module, entryPoint: "vs" },
     fragment: { module, entryPoint: "fs_depth", targets: [{ format, writeMask: 0 }] },
     primitive: { topology: "triangle-list" },
     depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
+    multisample: { count: MSAA, alphaToCoverageEnabled: true },
   });
   const pipeline = device.createRenderPipeline({
     layout: "auto",
@@ -237,8 +240,10 @@ async function main() {
     fragment: { module, entryPoint: "fs", targets: [{ format }] },
     primitive: { topology: "triangle-list" },
     depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "equal" },
+    multisample: { count: MSAA },
   });
   let zBuffer: GPUTexture | null = null;
+  let msaaColor: GPUTexture | null = null;
 
   // Shadow passes: half-res visibility in image space, march then depth-aware blur (see scene.wgsl).
   const shadowSize = [Math.ceil(W / 2), Math.ceil(H / 2)];
@@ -1108,7 +1113,9 @@ async function main() {
     const look = animatedLook(time);
     if (!zBuffer || zBuffer.width !== canvas.width || zBuffer.height !== canvas.height) {
       zBuffer?.destroy();
-      zBuffer = device.createTexture({ size: [canvas.width, canvas.height], format: "depth24plus", usage: GPUTextureUsage.RENDER_ATTACHMENT });
+      zBuffer = device.createTexture({ size: [canvas.width, canvas.height], format: "depth24plus", sampleCount: MSAA, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+      msaaColor?.destroy();
+      msaaColor = device.createTexture({ size: [canvas.width, canvas.height], format, sampleCount: MSAA, usage: GPUTextureUsage.RENDER_ATTACHMENT });
     }
     uniforms.set([
       canvas.width, canvas.height, W, H,
@@ -1167,7 +1174,7 @@ async function main() {
       sp.end();
     }
     const pass = enc.beginRenderPass({
-      colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }],
+      colorAttachments: [{ view: msaaColor!.createView(), resolveTarget: ctx.getCurrentTexture().createView(), loadOp: "clear", storeOp: "discard", clearValue: [0, 0, 0, 1] }],
       depthStencilAttachment: { view: zBuffer.createView(), depthLoadOp: "clear", depthClearValue: 1, depthStoreOp: "discard" },
     });
     // Main layer (instance 0), then the layers behind (instance 1, 2...): each only shows where the layers in front

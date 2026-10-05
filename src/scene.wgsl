@@ -597,8 +597,11 @@ fn vs(@builtin(vertex_index) i: u32, @builtin(instance_index) layer: u32) -> VsO
 // before the depth test (which a discard in the shading shader forces) cost about 3x.
 @fragment
 fn fs_depth(@location(0) uv: vec2f) -> @location(0) vec4f {
-  if (textureSample(photoTex, samp, uv).a < 0.5) { discard; }
-  return vec4f(0.0);
+  // Alpha to coverage (4x multisampling): the cut-out's filtered alpha decides how many samples of the pixel it covers,
+  // so outlines come out anti-aliased instead of stair-stepped. Fully clear: no samples at all.
+  let a = textureSample(photoTex, samp, uv).a;
+  if (a < 0.02) { discard; }
+  return vec4f(0.0, 0.0, 0.0, smoothstep(0.25, 0.75, a));
 }
 
 // Shadows, in three passes over a half-resolution image-space texture:
