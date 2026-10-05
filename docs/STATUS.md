@@ -1,8 +1,72 @@
 # Doppler Canyon: status and handoff
 
-Last updated 2026-10-04 (night). Read this first when picking the project back up; start with **Handoff 2026-10-04 night** below.
+Last updated 2026-10-05 (evening). Read this first when picking the project back up. Two threads: the
+**camera-mapping utility** (start with **Handoff 2026-10-05** below) and the canyon visualizer (**Handoff 2026-10-04
+night**; its real sunrise is still its next step).
 
-## Handoff 2026-10-04 night (start here)
+## Handoff 2026-10-05: camera-mapping utility (start here)
+
+**Goal (the user's words):** any image in -> a matte-painting camera projection: separate cut-out layers (fg/mg/bg...),
+each extended by inpainting behind what's in front and past the frame, real-size geometry per layer, a projection
+camera that lines them up, a small animated camera for parallax, Maya out (.abc + .ma). End to end, the only user
+interaction being the dimension check. Later a web app (Claude API judges the image; users don't connect a claude.ai
+subscription). A person may optionally supply layer cut-outs and/or painted plates; the tool then only fills gaps.
+
+**Where we are.** Works end to end on two test images; the user's verdict on the car: "the general scene looks right
+and the parallax is right", artifacts left are small. Latest exports (open in Maya, look through renderCam):
+`scenes/car-beach/maya/v001/car_beach_v001.ma` (images/car_beach.webp, scale x1) and `scenes/ice-cave/maya/ice_cave.ma`
+(images/ice_cave.webp, x1.5; exported before versioning and before the seam/choke/BiRefNet fixes: re-run `layers`,
+`paint`, `export` to bring it up to date, it will become its v001). `scenes/car-beach/car_beach_saved.ma` is the
+user's accidental save, kept aside; the unversioned files directly in `scenes/car-beach/maya/` duplicate v001
+(ask before deleting). The two scenes' `parts.json` (Claude's judging) live in `scenes/` (git-ignored): don't lose them.
+
+**Tool:** `tools/camera_map.py` (+ `tools/camera_map_maya.py` under mayapy, Maya 2027). Steps:
+1. `measure <image> <scene>`: MoGe-2 metric depth, lens, normals, sky; dimensions.png with labelled sizes.
+2. `scale <scene> --factor F` or `--set name=metres`: the user confirms the size (the one interactive step).
+3. `parts.json` (written by Claude by hand so far: parts, points (u, v), near-to-far order, layer per part, a "rest"
+   layer, one prompt per layer), then `tools/segment_parts.py <scene>` (SAM 2 traces each part).
+4. `layers <scene>`: parts -> layer masks. Freestanding objects get BiRefNet's outline (sharp, real holes) as the final
+   word; strays/slivers/islands cleaned; check `layers_overlay.png`.
+5. `paint <scene>`: per layer, FLUX.1 Fill behind the nearer layers (only as far as the move reveals) and past the frame
+   (12% border); SAM check of what's painted; MoGe depth per painted layer fitted to the real depth; check
+   `layers_painted.png`. ~13 min on the 4090 for 4 layers.
+6. `export <scene>`: `maya/vNNN/` (a new version every time, never overwritten): projCam (fixed, gate = whole canvas,
+   projection nodes), renderCam (photo lens, sway, at rest on frame 1), one mesh per layer + sky card, levelled.
+Check renders (Arnold, watermark; Maya's default view transform makes them darker): scratchpad script
+`render_maya.py <scene> <frames>`; recreate it if the scratchpad is gone (open latest vNNN .ma, arnoldRender renderCam).
+
+**Lessons (each cost a round; keep them):**
+- One depth sheet with patches is wrong; separate layers are right. MoGe depth is too smooth to find layers: SAM does.
+- Cut-outs were the weak link (the user spotted it): SAM's outlines are loose, and the gap SAM's sky leaves round an
+  object got filled by depth, which MoGe blurs across edges: a band of sky moved with the car. BiRefNet fixed it.
+- Inpainting must not leave a seam (the user's point): mask exactly the hole (growing it into real pixels and pasting
+  them back left a hard join); Flux's autoencoder shifts tone slightly, so measure the shift on the same pixels just
+  outside the hole and carry it smoothly across (`membrane`). Choke the far layer 2 px next to a nearer one and bleed
+  the near layer's colours into its transparent margin: no outlines or halos left behind.
+- Flux Fill: paints an object into an object-shaped hole, duplicates whatever the prompt names, "cinematic" gives
+  letterbox bars. Prompts describe what's really there (clouds, not "misty haze"), say "empty", name nothing in view.
+- Mesh past a layer's outline must take the layer's own depth (else streaks as the camera moves); Arnold needs
+  aiOpaque off; Maya's projection node fits horizontally (projCam filmFit horizontal), measured.
+- FLUX.1 Fill loads fp8-stored (23.8 GB bf16 spills to system RAM on the 4090) from
+  C:\AI_Models\huggingface\FLUX.1-Fill-dev (hard links; the hub copy is WSL symlinks Windows can't read).
+  BiRefNet: ZhengPeng7/BiRefNet in C:\AI_Models\huggingface (needs timm, kornia: installed in tools/.venv).
+
+**NEXT (in the order discussed):**
+1. Gen-Fill style painting (the user's Photoshop habit): only the band the camera can reveal, on crops at full
+   resolution, 3 variants with the best picked automatically (edge match + SAM check), retry instead of the smear
+   fallback (the last pale sliver under the car is that fallback).
+2. The Claude API step that writes parts.json and checks layers_overlay/layers_painted (prompt rules above).
+3. Input path for the user's own cut-outs (PSD or PNGs, named near-to-far) and painted plates; anything painted beyond
+   the visible part counts as real. Plus automatic handling of contours inside a layer (strips where the move
+   reveals more than a few px), reported to the user.
+4. Adaptive / quad meshes (now 2 px grids, ~1M triangles a layer: too dense to edit in Maya).
+5. Speed: keep models loaded, 28 Flux steps, crops (estimates: H100 ~1.5-2 min a scene after that).
+**Product notes:** FLUX.1-dev licence is non-commercial: compare models when it becomes a product (BFL licence or
+FLUX Fill [pro] API vs Apache Qwen-Image-Edit / Flux 2 Klein 4B). On-demand serverless GPUs (Modal / RunPod /
+Replicate), weights (~40 GB) cached on the provider's volume. A server can't run mayapy: .abc via PyAlembic, .ma as
+text. Rough cost per image: Claude ~$0.25-0.30 (Opus 5.5), GPU ~$0.20-0.50.
+
+## Handoff 2026-10-04 night
 
 **Where we are.** The main scene is `scenes/canyon-vista` with its own graph `graphs/vista.json` (loaded automatically):
 http://localhost:5173/?scene=canyon-vista&track=doomsday_clock-thomas_barrandon.m4a . The user is happy with it
