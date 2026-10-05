@@ -435,6 +435,10 @@ async function main() {
   const land = depth.filter((z) => z < info.far * 0.98).sort();
   const pct = (f: number) => (land.length ? land[Math.floor((land.length - 1) * f)] : info.far / 2);
   const pivotZ = pct(0.5);
+  // Laser widths are given as an angle at a reference distance. On a true-scale scene that distance is a fixed 500 m,
+  // so beams have a real thickness (0.03 deg = 0.26 m) and near ones read thicker than far ones; the scene's middle
+  // distance (~60 m here) made every beam a few cm, thinner than a pixel at any distance, so all looked the same.
+  const beamRefZ = info.metersPerUnit ? 500 / info.metersPerUnit : pivotZ;
   // Depth of the rock around the camera: the sun's shadows treat anything this near as part of the cave.
   const caveDepth = pct(0.7) * 1.5;
   // Parallax range: how much more a near rock moves than the pivot, per unit of camera travel.
@@ -1285,7 +1289,7 @@ async function main() {
       const n = S.scanLines;
       const flick = 1 - S.flicker * Math.random();
       // sheet > 1 marks a scanned plane for the shader: 1 + the plane's brightness.
-      laserData.set([...o, n, ...d, 1 + S.scanBright, ...right, half, ...normal, brightness * flick, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
+      laserData.set([...o, n, ...d, 1 + S.scanBright, ...right, half, ...normal, brightness * flick, ...(S.color as Vec3), S.width * rad * beamRefZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
       for (let k = 0; k < n; k++) {
         const a = -half + (2 * half * k) / (n - 1);
         const dk = normalize(d.map((x, j) => x * Math.cos(a) + right[j] * Math.sin(a)) as Vec3);
@@ -1357,7 +1361,7 @@ async function main() {
       const half = (L.spread / 2) * rad;
       const base = 4 + li * 24;
       // Width: degrees as seen from the middle distance of the scene, turned into a physical thickness.
-      laserData.set([...o, L.count, ...aim, L.sheet, ...right, half, ...normal, L.intensity, ...(L.color as Vec3), L.width * rad * pivotZ, L.hit, maxLen, L.glow, L.reach], base);
+      laserData.set([...o, L.count, ...aim, L.sheet, ...right, half, ...normal, L.intensity, ...(L.color as Vec3), L.width * rad * beamRefZ, L.hit, maxLen, L.glow, L.reach], base);
       for (let bi = 0; bi < L.count; bi++) {
         const a = L.count > 1 ? -half + (2 * half * bi) / (L.count - 1) : 0;
         const d = normalize(aim.map((x, i) => x * Math.cos(a) + right[i] * Math.sin(a)) as Vec3);
@@ -1379,7 +1383,7 @@ async function main() {
       const li = used++;
       const height = info.far * 0.6;
       const count = S.from === 1 && S.rigs?.length ? Math.min(24, S.rigs.length) : S.count;
-      laserData.set([0, 0, 0, count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * pivotZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
+      laserData.set([0, 0, 0, count, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, brightness, ...(S.color as Vec3), S.width * rad * beamRefZ, S.hit, maxLen, S.glow, S.reach], 4 + li * 24);
       if (S.from === 1) {
         groundRigs(S, li, step, maxLen);
         continue;

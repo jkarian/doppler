@@ -823,7 +823,8 @@
    "params": {
     "threshold": 0.06,
     "attack": 0.05,
-    "release": 1.7
+    "release": 0.7,
+    "hold": 1.0
    },
    "pos": [
     1300,

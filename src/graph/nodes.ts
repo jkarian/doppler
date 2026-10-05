@@ -324,7 +324,8 @@ const defs: NodeDef[] = [
     category: "Music",
     doc:
       "Peaks in the song: how far the music's intensity rises above its own recent level (the last `window` seconds), " +
-      "so a hit stands out whether the part is quiet or loud. peak: 0..1 now, rising over attack and falling over release. " +
+      "so a hit stands out whether the part is quiet or loud. peak: 0..1 now, rising over attack, holding its top for hold " +
+      "seconds, then falling over release. " +
       "push: the peaks added up over time (seconds of full peak so far), for things that speed up on peaks without jumping: " +
       "wire it into a phase, as SkyLaser's peakPush does.",
     inputs: [
@@ -332,6 +333,7 @@ const defs: NodeDef[] = [
       { name: "threshold", default: 0.03, kind: "const", min: 0, max: 0.5, step: 0.005, doc: "how far above the recent level counts as a peak" },
       { name: "attack", default: 0.03, kind: "const", min: 0.005, max: 1, step: 0.005, doc: "seconds to rise" },
       { name: "release", default: 0.6, kind: "const", min: 0.02, max: 5, step: 0.01, doc: "seconds to fall" },
+      { name: "hold", default: 0, kind: "const", min: 0, max: 5, step: 0.05, doc: "seconds a peak stays at its top before it starts to fall" },
     ],
     outputs: ["peak", "push"],
     init: (c, ctx) => {
@@ -357,10 +359,16 @@ const defs: NodeDef[] = [
       const push = new Float32Array(n);
       const up = 1 - Math.exp(-1 / (num(c.attack) * rate));
       const down = 1 - Math.exp(-1 / (num(c.release) * rate));
+      const hold = Math.round(Math.max(0, num(c.hold)) * rate);
       let e = 0;
+      let held = 0; // samples left before a peak may start to fall
       for (let k = 0; k < n; k++) {
         const target = Math.min(1, rise[k] / Math.max(top, 1e-4));
-        e += (target - e) * (target > e ? up : down);
+        if (target > e) {
+          e += (target - e) * up;
+          held = hold;
+        } else if (held > 0) held--;
+        else e += (target - e) * down;
         peak[k] = e;
         push[k] = (k ? push[k - 1] : 0) + e / rate;
       }

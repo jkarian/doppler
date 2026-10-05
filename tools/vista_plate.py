@@ -49,6 +49,7 @@ BEHIND_PX = 120  # how far behind the cave frame the pillars carry on (beyond an
 HAZE_VISIBILITY_M = 150_000.0  # how far the air lets you see: sets the haze on far land
 EDGE_PX = 2  # cut-outs lose this much of their outline (scene pixels): the blended edge pixels made a halo
 NORMAL_BAND_PX = 4  # and their normals come from this much further in (edge normals turn sideways: a lit rim)
+MARKUP_HOLE_PX = 20_000  # unpainted spots in the cave markup smaller than this (scene pixels) count as cave
 KEPT_ERODE_PX = 3  # the kept strip loses this much (scene pixels) to the near rock: its rim moves with it
 
 
@@ -96,6 +97,14 @@ def main() -> None:
         # painted it. As cave it floated at cave distance as a lit halo around the spire.
         m = np.asarray(Image.open(args.markup).convert("RGB").resize((W, H), Image.NEAREST)).astype(np.float64)
         cave = np.linalg.norm(m - np.array(FRAME_RGB, np.float64), axis=-1) < 60
+        # Small spots the markup left unpainted inside the cave are cave too (as vista they were holes: flecks of
+        # whatever lies behind, showing through the rock).
+        lab, n = ndi.label(~cave)
+        sizes = np.bincount(lab.ravel())
+        cave |= np.isin(lab, np.nonzero(sizes < MARKUP_HOLE_PX)[0]) & (lab > 0)
+        # Where the markup paints cave, it's cave even if the middle layer repeats the photo there (the painted wall
+        # reuses real cave rock in places): as pillar those spots sat at pillar distance and slid as flecks.
+        pillars &= ~cave
         vista |= ~cave & ~pillars
     elif args.pillars:
         a = np.asarray(Image.open(args.pillars).convert("RGBA").resize((W, H), Image.LANCZOS))[..., 3]

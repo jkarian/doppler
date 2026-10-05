@@ -113,6 +113,7 @@ const HELP: Record<string, string> = {
   "Peaks.threshold": "How far above the recent level counts as a peak.",
   "Peaks.attack": "Seconds for the peak signal to rise.",
   "Peaks.release": "Seconds for it to fall back.",
+  "Peaks.hold": "Seconds a peak stays at its top before it starts to fall (laser fans hold open, then close).",
   "Laser.originU": "Where the fixture sits, left-right (0-1 across the picture).",
   "Laser.originV": "Where the fixture sits, up-down (0-1 down the picture).",
   "Laser.originDepth": "0 = on the rock at that spot; more = floating in the air that far out.",

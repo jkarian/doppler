@@ -328,7 +328,8 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       let scanned = L.sheet > 1.0;
       let edgeLine = bi == 0u || bi + 1u == n;
       let drawn = !scanned || edgeLine;
-      g += select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen;
+      // The air veils the far parts of a beam like the far land (aerial perspective).
+      g += select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen * exp(-u.hazeBeta * t);
       // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
       if (db.w < 0.0) {
         let to = dot(o - cam, v);
