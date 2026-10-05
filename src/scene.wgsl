@@ -41,7 +41,7 @@ struct Uniforms {
   skyA: vec4f,         // sky gradient: mix with the photo, brightness, clouds, glow around the sun
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
   sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth, cave rock solid depth (fractions of distance)
-  up: vec4f,           // true vertical in scene space (the photo's camera looks down a little), background layer present (1/0)
+  up: vec4f,           // true vertical in scene space (the photo's camera looks down a little); w: layers behind the main one
   sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), -, -, -
 };
 
@@ -677,8 +677,10 @@ fn visUp(tex: texture_2d<f32>, uv: vec2f, z: f32) -> vec4f {
     seen = max(seen, m);
   }
   // None of the shadow texels saw this surface (a layer behind, uncovered by the camera): no image-space shadow
-  // is known for it, so leave it unshadowed rather than borrow the shadow of what's in front.
-  if (seen < 0.05) { return vec4f(1.0); }
+  // is known for it. It was hidden behind nearer rock, so it counts as in that rock's shadow. (Unshadowed, the
+  // uncovered strips lit up as pale bands along the cave rim at sunrise; borrowing the front rock's own shadow
+  // instead gave dark seams.)
+  if (seen < 0.05) { return vec4f(0.0); }
   return sum / max(wsum, 1e-6);
 }
 
@@ -802,7 +804,10 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   var las = LaserLight(vec3f(0.0), vec3f(0.0));
   if (lasers.count > 0u) { las = laserLight(select(p, viewPos(uv, u.far * 4.0), sky), sky); }
   var scanRock = vec3f(0.0);
-  if (u.scanColor.a > 0.0 && !sky) { scanRock = u.scanColor.rgb * scanLight(p) * distanceFade(distance(p, u.camPos)); }
+  // The scan sweeps the vista: with layers, only the last one (the vista plate) takes it. On the near layers its
+  // trailing slices lit whole smooth painted surfaces at once, as pale bands where the camera uncovered them.
+  let vistaLayer = f32(layer) > u.up.w - 0.5;
+  if (u.scanColor.a > 0.0 && !sky && vistaLayer) { scanRock = u.scanColor.rgb * scanLight(p) * distanceFade(distance(p, u.camPos)); }
   let rockLight = las.rock + scanRock;
   color += (albedo + 0.08) * rockLight * 2.0;
 

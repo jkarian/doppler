@@ -47,6 +47,8 @@ FRAME_RGB = (139, 0, 0)  # layers_from_markup.py: "frame (cave walls)"
 PILLARS_RGB = (0, 80, 140)  # layers_from_markup.py: "pillars and spire"
 BEHIND_PX = 120  # how far behind the cave frame the pillars carry on (beyond any camera move)
 HAZE_VISIBILITY_M = 150_000.0  # how far the air lets you see: sets the haze on far land
+EDGE_PX = 2  # cut-outs lose this much of their outline (scene pixels): the blended edge pixels made a halo
+NORMAL_BAND_PX = 4  # and their normals come from this much further in (edge normals turn sideways: a lit rim)
 KEPT_ERODE_PX = 3  # the kept strip loses this much (scene pixels) to the near rock: its rim moves with it
 
 
@@ -182,11 +184,20 @@ def main() -> None:
         # A cut-out: see-through outside the outline (alpha), and everything else carried a little past it from the
         # nearest pixel inside, so filtering at the edge doesn't pick up other colours and the depth has no step there
         # (a step would make the renderer stretch the edge into spikes).
-        _, (iy, ix) = ndi.distance_transform_edt(~M, return_indices=True)
-        ext = lambda img: img[iy, ix]
-        mid_photo = np.dstack([ext(mid_rgb), M.astype(np.uint8) * 255])
-        layers.append(("mid", mid_photo, ext(mid_albedo), ext(np.where(M[..., None], n_comp, n_plate)), ext(z_mid)))
-        layers.append(("bg", plate, bg_albedo, n_plate, z_plate))
+        A, ext, ext_n = cutout(M)
+        mid_photo = np.dstack([ext(mid_rgb), A.astype(np.uint8) * 255])
+        layers.append(("mid", mid_photo, ext(mid_albedo), ext_n(np.where(M[..., None], n_comp, n_plate)), ext(z_mid)))
+        # Behind the cave where the middle layer doesn't reach, the plate holds whatever the painting put there (sky
+        # where the cave ceiling was): uncovered by the camera it showed as pale bands along the rim. The cave carries
+        # on behind itself instead, its own rock (softened) a little deeper.
+        behind = frame & ~M
+        soft = lambda a: cv2.GaussianBlur(a, (0, 0), 4)
+        bg_photo, bg_alb, bg_nrm = plate.copy(), bg_albedo.copy(), n_plate.copy()
+        for dst, img in ((bg_photo, photo), (bg_alb, albedo), (bg_nrm, normal_src)):
+            dst[behind] = soft(img)[behind]
+        z_bg = np.where(behind, z_near * 1.3, z_plate)
+        print(f"  cave behind the cave (no middle layer there): {behind.mean() * 100:.1f}% of the picture")
+        layers.append(("bg", bg_photo, bg_alb, bg_nrm, z_bg))
     else:
         # Near rock behind near rock (cave wall over a pillar, the spire against the right wall): what's hidden
         # there is more rock, not vista. Behind the frame, each pixel takes the nearest pillar-or-vista pixel; where
@@ -207,11 +218,11 @@ def main() -> None:
     if mid is not None:
         # The main layer becomes a cut-out of the cave alone (the pillars are in the middle layer, the vista behind),
         # carried past its outline from the nearest cave pixel like the middle layer, so it has no depth step there.
-        _, (iy, ix) = ndi.distance_transform_edt(~frame, return_indices=True)
-        z_mesh, n_main = z_main[iy, ix], n_main[iy, ix]
+        A, ext, ext_n = cutout(frame)
+        z_mesh, n_main = ext(z_main), ext_n(n_main)
         main_files = {"image": "photo.png", "albedo": "albedo.png", "meshDepth": "mesh_depth.bin"}
-        cave_photo = np.dstack([photo[iy, ix], frame.astype(np.uint8) * 255])
-        cave_albedo = albedo[iy, ix]
+        cave_photo = np.dstack([ext(photo), A.astype(np.uint8) * 255])
+        cave_albedo = ext(albedo)
 
     args.out.mkdir(parents=True, exist_ok=True)
     if mid is not None:
@@ -239,6 +250,18 @@ def main() -> None:
              "background": background if len(background) > 1 else background[0]}
     (args.out / "scene.json").write_text(json.dumps(scene, indent=2))
     print(f"wrote {args.out}")
+
+
+def cutout(mask: np.ndarray):
+    """A cut-out layer's outline and how to fill past it. The outline is pulled in EDGE_PX: the outermost pixels of a
+    cut blend the rock with what was behind it and showed as a thin halo. Colour, albedo and depth carry on past the
+    outline from the nearest pixel inside, so filtering at the edge picks up no other colour and the mesh has no depth
+    step there (a step would stretch into spikes). Normals carry on from NORMAL_BAND_PX further in: at the very edge
+    they turn sideways, and the lights caught them as a glowing rim."""
+    A = ndi.binary_erosion(mask, iterations=EDGE_PX)
+    _, (iy, ix) = ndi.distance_transform_edt(~A, return_indices=True)
+    _, (ny, nx) = ndi.distance_transform_edt(~ndi.binary_erosion(A, iterations=NORMAL_BAND_PX), return_indices=True)
+    return A, (lambda img: img[iy, ix]), (lambda img: img[ny, nx])
 
 
 def moge(img: np.ndarray, resolution_level: int):

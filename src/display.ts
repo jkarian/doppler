@@ -1108,7 +1108,7 @@ async function main() {
       ...scanUniforms(graphOut.scan),
       ...skyUniforms(),
       look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, graphOut.sun?.caveDepth ?? 15,
-      ...UP, bgBindGroups.length ? 1 : 0,
+      ...UP, bgBindGroups.length,
       graphOut.sun?.terminator ?? 0, 0, 0, 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility

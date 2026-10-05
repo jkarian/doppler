@@ -225,13 +225,13 @@
     "azimuth": 0,
     "enabled": 1,
     "maxArc": 3,
-    "floorLight": 0,
-    "gain": 10,
-    "bounce": 0.25,
+    "floorLight": 0.1,
+    "gain": 9.4,
+    "bounce": 0.8,
     "shadowDepth": 0.5,
     "shadowSoftness": 0.05,
-    "caveDepth": 0.5,
-    "floorBelow": -1100
+    "caveDepth": 5,
+    "floorBelow": -200
    }
   },
   {
@@ -357,7 +357,7 @@
    "params": {
     "baseDim": 0.14,
     "baked": 0.1,
-    "cap": 4.85
+    "cap": 4.95
    }
   },
   {
@@ -779,7 +779,7 @@
    "type": "Sky",
    "name": "Sky",
    "params": {
-    "brightness": 6.3
+    "brightness": 3.4
    },
    "pos": [
     620,
