@@ -462,10 +462,12 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
           // can't wash it out.
           if (scannedPlane) { g += line * 0.35 * distanceFade(length(toP)); }
           // A scanning plane leaves a fading trail on the rock behind the line, like the MRI scan's (the plane moves
-          // toward +normal): it shows which way the scan travels. Measured as an angle from the rig.
+          // toward +normal): it shows which way the scan travels. A real-world length behind the line (about 4 m on
+          // true-scale scenes), so it shrinks with distance; the MRI scan's shape: a quick drop and a short faint tail.
           if (scannedPlane && off < 0.0) {
-            let y = (-off / max(length(rel), 1e-3)) / 0.06;
-            r += L.hit * 0.9 * (0.75 * exp(-y / 0.04) + 0.25 * exp(-y / 0.3));
+            let trail = select(0.03 * distance(p, cam), u.sunC.z * 80.0, u.sunC.z > 0.0);
+            let y = -off / trail;
+            r += L.hit * lw.y * 0.5 * (0.75 * exp(-y / 0.04) + 0.25 * exp(-y / 0.25));
           }
         }
       }
