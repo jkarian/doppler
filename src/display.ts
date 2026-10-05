@@ -1268,16 +1268,29 @@ async function main() {
   // start as a visible rig for the shader.
   // A hand-placed rig's beam: a random direction inside its cone (even over its area), new each step, swaying a
   // little while lit. While placing rigs it points straight down the cone's axis.
+  // How far a rig has turned toward this step's new aim: eased over the first TURN_PART of the step.
+  const TURN_PART = 0.3;
+  const turnEase = (S: NonNullable<RenderOut["skyLasers"]>[number], step: number) => {
+    const x = clamp((S.trigger - step) / TURN_PART, 0, 1);
+    return x * x * (3 - 2 * x);
+  };
   const rigBeam = (S: NonNullable<RenderOut["skyLasers"]>[number], q: number[], bi: number, step: number) => {
     const { o, d: aim } = rigAim(q);
     if (placing === "rigs") return { o, d: aim };
-    const r = seeded(S.seed * 104729 + step * 131 + bi * 17);
     const phase = 2 * Math.PI * (S.driftSpeed * S.t) + bi * 1.7;
     const half = (q[4] / 2) * rad;
-    const th = clamp(half * Math.sqrt(r()) + S.drift * rad * 0.5 * Math.sin(phase), 0, half);
-    const ph = 2 * Math.PI * r() + 0.3 * Math.sin(phase * 0.7 + 1.1);
     const [e1, e2] = coneBasis(aim);
-    return { o, d: normalize(aim.map((x, j) => x * Math.cos(th) + (e1[j] * Math.cos(ph) + e2[j] * Math.sin(ph)) * Math.sin(th)) as Vec3) };
+    const dirAt = (k: number): Vec3 => {
+      const r = seeded(S.seed * 104729 + k * 131 + bi * 17);
+      const th = clamp(half * Math.sqrt(r()) + S.drift * rad * 0.5 * Math.sin(phase), 0, half);
+      const ph = 2 * Math.PI * r() + 0.3 * Math.sin(phase * 0.7 + 1.1);
+      return normalize(aim.map((x, j) => x * Math.cos(th) + (e1[j] * Math.cos(ph) + e2[j] * Math.sin(ph)) * Math.sin(th)) as Vec3);
+    };
+    // A real rig can't snap to a new angle: it turns from the last aim to the new one over the start of the step.
+    const k = turnEase(S, step);
+    const d0 = dirAt(step - 1);
+    const d1 = dirAt(step);
+    return { o, d: k >= 1 ? d1 : normalize(d0.map((x, j) => x + (d1[j] - x) * k) as Vec3) };
   };
   // Scanning rigs: each beam becomes a scanner sweeping fast across a fan, read by the eye as a triangular plane of
   // light. One fixture per rig (its own plane): scanLines beams across the fan give the plane its length at each
@@ -1291,9 +1304,10 @@ async function main() {
       const beam = onVista ? { o: viewPos(q[0], q[1], vistaDepthAt(q[0], q[1]) * 0.995), d: worldDir(q[2] * rad, q[3] * rad) } : rigBeam(S, q, bi, step);
       const o = beam.o;
       let d = beam.d;
-      const r = seeded(S.seed * 7907 + step * 53 + bi * 29);
-      // Roll: random per step, or fixed from level (0 = a flat fan spreading sideways, around true vertical).
-      const roll = S.planeRoll >= 0 ? S.planeRoll * rad : Math.PI * r();
+      // Roll: random per step (turning smoothly from the last one, like the aim), or fixed from level (0 = a flat
+      // fan spreading sideways, around true vertical).
+      const rollAt = (k: number) => Math.PI * seeded(S.seed * 7907 + k * 53 + bi * 29)();
+      const roll = S.planeRoll >= 0 ? S.planeRoll * rad : rollAt(step - 1) + (rollAt(step) - rollAt(step - 1)) * turnEase(S, step);
       let right = normalize(cross(S.planeRoll >= 0 ? UP : [0, 1, 0], d));
       if (!Number.isFinite(right[0])) right = [1, 0, 0];
       const up = cross(d, right);

@@ -31,6 +31,8 @@ export interface SceneConsts {
  * Scattered lasers: from the sky, count beams (or vertical sheets) come straight down onto random spots on
  * the rock; from the ground, count fixed rigs on the rock each fire a beam in a random direction.
  */
+const smooth01 = (x: number) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2 * k); };
+
 export interface SkyLaserOut {
   from: number; // 0: from the sky, 1: from rigs on the ground
   elevMin: number; // ground: aim elevation range, degrees
@@ -499,6 +501,7 @@ const defs: NodeDef[] = [
       { name: "normal", default: 1, kind: "const", min: 0, max: 1, step: 1 },
       { name: "outro", default: 1, kind: "const", min: 0, max: 1, step: 1 },
       { name: "drops", default: "", kind: "const", doc: "which drops it plays in, counted from 1 (e.g. 2, or 1 3); a leading - means all but those (e.g. -2). Empty: all" },
+      { name: "lead", default: 0, kind: "const", min: 0, max: 4, step: 0.05, doc: "seconds it starts before its sections (so something can ramp into a drop)" },
       { name: "fadeIn", default: 0.05, kind: "const", min: 0, max: 8, step: 0.05, doc: "seconds" },
       { name: "fadeOut", default: 1.5, kind: "const", min: 0, max: 8, step: 0.05, doc: "seconds" },
     ],
@@ -521,8 +524,9 @@ const defs: NodeDef[] = [
         if (!want(s.kind)) continue;
         if (s.kind === "drop" && nums.size && nums.has(dropNo) === except) continue;
         const last = runs.at(-1);
-        if (last && Math.abs(last[1] - s.start) < 1e-3) last[1] = s.end;
-        else runs.push([s.start, s.end]);
+        const start = s.start - Math.max(0, num(c.lead));
+        if (last && last[1] >= start - 1e-3) last[1] = s.end;
+        else runs.push([start, s.end]);
       }
       if (!ctx.music) runs.push([-Infinity, Infinity]);
       return { off: false, runs, fadeIn: num(c.fadeIn), fadeOut: num(c.fadeOut) };
@@ -854,8 +858,9 @@ const defs: NodeDef[] = [
         sheet: clamp(num(i.sheet), 0, 1), sheetWidth: Math.max(0.5, num(i.sheetWidth)), fade: Math.max(0, num(i.fade)),
         width: Math.max(0.005, num(i.width)), glow: Math.max(1, num(i.glow)), reach: clamp(num(i.reach), 0.05, 1), color: vec(i.color), intensity, hit: Math.max(0, num(i.hit)),
         // The planes open with the peaks: lines at rest, scanSpreadPeak wide at a full peak, closing as it decays.
-        scan: clamp(num(i.scan), 0, 1),
-        scanSpread: clamp(num(i.scanSpread) + (num(i.scanSpreadPeak) - num(i.scanSpread)) * clamp(num(i.peak), 0, 1), 0.2, 120),
+        // Scanning switches on as soon as scan rises; the fan opens with it (a Setup's fade), never popping open.
+        scan: num(i.scan) > 0.01 ? 1 : 0,
+        scanSpread: clamp(num(i.scanSpread) + (num(i.scanSpreadPeak) - num(i.scanSpread)) * clamp(num(i.peak), 0, 1) * smooth01(num(i.scan)), 0.2, 120),
         scanLines: Math.round(clamp(num(i.scanLines), 2, 24)),
         scanBright: Math.max(0, num(i.scanBright)), flicker: clamp(num(i.flicker), 0, 1),
         // Speed changes are integrated (push is the peaks added up over time), so a faster swing never jumps.

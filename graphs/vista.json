@@ -37,7 +37,7 @@
    "name": "Sun spurts",
    "params": {
     "max": 180,
-    "heaviness": 16.1,
+    "heaviness": 16.5,
     "dropMax": 90,
     "dropMin": 0,
     "sizeMax": 28,
@@ -811,7 +811,9 @@
     "breakdown": 0,
     "normal": 0,
     "outro": 0,
-    "drops": "-2"
+    "drops": "-2",
+    "lead": 0.2,
+    "fadeIn": 0.2
    },
    "pos": [
     1630,
@@ -827,7 +829,7 @@
     "attack": 0.005,
     "release": 0.7,
     "hold": 1,
-    "lead": 0.33
+    "lead": 0.2
    },
    "pos": [
     1300,
