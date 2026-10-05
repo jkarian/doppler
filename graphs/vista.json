@@ -1087,6 +1087,18 @@
     "shininess": 120,
     "swirl": 1.5
    }
+  },
+  {
+   "id": "sunBloom",
+   "type": "Expression",
+   "name": "Sunset bloom: with the rise, strongest when low",
+   "pos": [
+    620,
+    40
+   ],
+   "params": {
+    "expr": "1.6 * a * (1.2 - 0.4 * clamp(b / 8, 0, 1))"
+   }
   }
  ],
  "wires": [
@@ -2168,6 +2180,36 @@
    "to": [
     "sun",
     "rise"
+   ]
+  },
+  {
+   "from": [
+    "sunRise",
+    "value"
+   ],
+   "to": [
+    "sunBloom",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "sunHeight",
+    "value"
+   ],
+   "to": [
+    "sunBloom",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "sunBloom",
+    "value"
+   ],
+   "to": [
+    "sun",
+    "bloom"
    ]
   }
  ]

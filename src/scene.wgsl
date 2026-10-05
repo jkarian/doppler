@@ -46,6 +46,7 @@ struct Uniforms {
   hazeC: vec4f,        // aerial haze by hand: opacity at and beyond far, near, far (scene units), on (1/0); off: hazeBeta
   waterC: vec4f,       // flowing water: speed (scene units / s), ripple size (scene units), sheen (sky reflection), glints (Blinn)
   waterD: vec4f,       // foam (rushing brightness), shininess (Blinn exponent), ripple strength (normal tilt), swirl (curl noise)
+  sunD: vec4f,         // sunset bloom (lens flare strength, times visibility), -, -, -
 };
 
 // How much of a surface (or laser) at distance d shows through the air (1 = all). By hand (Sky node haze, near,
@@ -122,6 +123,18 @@ fn lensFlare(frag: vec2f) -> vec3f {
   let r = length(d);
   let ang = atan2(d.y, d.x);
   var c = vec3f(1.0, 0.85, 0.6) * (exp(-r * r * 60.0) * 1.2 + exp(-r * 3.5) * 0.12);
+  // Sunset bloom (sunB.w): a blown-out white-hot core, a wide glow in the sun's colour flooding the air around it
+  // (stronger the lower the sun: more air to light up), and a long horizontal streak, like a phone photo straight into
+  // a low sun.
+  let bloom = u.sunD.x;
+  if (bloom > 0.0) {
+    let low = 1.0 - smoothstep(0.0, 25.0, u.skyB.x);
+    c += vec3f(1.0, 0.97, 0.9) * exp(-r * r * 900.0) * 6.0 * bloom;                 // the disc, burnt out
+    c += vec3f(1.0, 0.75, 0.4) * exp(-r * 9.0) * 1.4 * bloom;                         // hot halo
+    c += vec3f(1.0, 0.55, 0.22) * exp(-r * 2.2) * (0.35 + 0.5 * low) * bloom;         // glow flooding the air
+    c += vec3f(1.0, 0.7, 0.4) * exp(-abs(d.y) * 70.0) * exp(-abs(d.x) * 1.6) * 0.9 * bloom;  // horizontal streak
+    c += vec3f(1.0, 0.8, 0.55) * (pow(abs(cos(ang * 2.0)), 400.0) + pow(abs(cos(ang * 3.0 + 0.4)), 300.0)) * exp(-r * 3.0) * 0.8 * bloom;
+  }
   // Starburst: thin streaks, fading out from the sun.
   let streak = pow(abs(cos(ang * 3.0)), 60.0) * 0.5 + pow(abs(cos(ang * 4.0 + 0.6)), 90.0) * 0.3;
   c += vec3f(1.0, 0.9, 0.75) * streak * exp(-r * 2.5) * 0.5;

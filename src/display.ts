@@ -278,7 +278,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 88;
+  const UNIFORM_FLOATS = 92;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
   const LASER_FIXTURES = 16; // matches `Lasers` in scene.wgsl: scanning rigs take one fixture each
   const LASER_FLOATS = 4 + LASER_FIXTURES * 24 + LASER_FIXTURES * 24 * 2 * 4;
@@ -1144,8 +1144,10 @@ async function main() {
         ? [graphOut.water.speed / metersPerUnitScene, graphOut.water.size / metersPerUnitScene, graphOut.water.sheen, graphOut.water.glints,
            graphOut.water.foam, graphOut.water.shininess, graphOut.water.ripple, graphOut.water.swirl]
         : [0, 0, 0, 0, 0, 0, 0, 0]),
+      0, 0, 0, 0, // sunD: set below once the sun's visibility is measured
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
+    uniforms[88] = look.sun ? (graphOut.sun?.bloom ?? 0) * flareVisible : 0; // sunset bloom, hidden with the disc
     uniforms[55] = graphOut.sun?.detailBump ?? 0; // scanLines.w: fine rock relief from the photo's texture
     device.queue.writeBuffer(uniformBuf, 0, uniforms);
     writeLasers(graphOut.lasers ?? [], graphOut.skyLasers ?? []);

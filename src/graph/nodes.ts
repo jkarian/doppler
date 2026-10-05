@@ -141,7 +141,7 @@ export interface RenderOut {
   scan?: ScanOut;
   lasers?: LaserOut[];
   skyLasers?: SkyLaserOut[];
-  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; rays: number; flare: number; skyBoost: number; floor: number; floorBelow: number; bounce: number; shadowSoftness: number; shadowDepth: number; caveDepth: number; detailBump: number; terminator: number };
+  sun?: { on: boolean; arc: number; azimuth: number; intensity: number; color: number[]; bloom: number; rays: number; flare: number; skyBoost: number; floor: number; floorBelow: number; bounce: number; shadowSoftness: number; shadowDepth: number; caveDepth: number; detailBump: number; terminator: number };
   camera?: { swayX: number; swayY: number; pushZ: number };
   tone?: { baseDim: number; baked: number; cap: number };
 }
@@ -728,6 +728,7 @@ const defs: NodeDef[] = [
       { name: "floorBelow", default: -4300, min: -20000, max: 5000, step: 50, doc: "real height in feet relative to the camera: flat ground lower than this counts as floor (plateau tops above it still get sun)" },
       { name: "terminator", default: 0.7, min: 0, max: 1, step: 0.05, doc: "how sharply sunlit rock turns to shade: 0 soft, 1 hard (faces toward the sun lit solid, crisp lips on ledges)" },
       { name: "detailBump", default: 3, min: 0, max: 20, step: 0.1, doc: "fine relief of the rock (cracks, grain) from the photo's texture, picked out by low light; affects all lights" },
+      { name: "bloom", default: 0, min: 0, max: 5, step: 0.05, doc: "sunset bloom: a burnt-out disc, a wide glow in the sun's colour and a horizontal streak, like shooting straight into a low sun (wire a rise or drop curve)" },
       { name: "minArc", default: -90, min: -90, max: 90, step: 0.5, doc: "degrees: the lowest the sun sits while it's up (rise 1): set it to the height where it just skims the ridge. It eases in with rise, so the sun still rises from below. -90: off" },
       { name: "rise", default: 0, min: 0, max: 1, step: 0.01, doc: "0..1: how far the sun is up for its moment (wire the rise curve here); minArc applies in proportion" },
       { name: "maxArc", default: 180, min: 0, max: 180, step: 0.5, doc: "degrees: the sun never goes higher (low enough, it lights only the walls). It eases into this ceiling over the last 6 degrees instead of stopping dead." },
@@ -739,7 +740,7 @@ const defs: NodeDef[] = [
       ctx.out.sun = {
         on: num(i.enabled) > 0.5 && k > 0.001, arc: softCeiling(Math.max(num(i.arc), num(i.arc) + (num(i.minArc) - num(i.arc)) * clamp(num(i.rise), 0, 1)), num(i.maxArc), 6), azimuth: num(i.azimuth),
         intensity: Math.max(0, num(i.intensity)) * Math.max(0, num(i.gain)) * k, floor: clamp(num(i.floorLight), 0, 1), floorBelow: num(i.floorBelow), bounce: Math.max(0, num(i.bounce)), shadowSoftness: clamp(num(i.shadowSoftness), 0, 1), shadowDepth: Math.max(0.01, num(i.shadowDepth)), caveDepth: Math.max(0.1, num(i.caveDepth)), detailBump: Math.max(0, num(i.detailBump)), terminator: clamp(num(i.terminator), 0, 1),
-        color: vec(i.color), rays: Math.max(0, num(i.rays)) * k, flare: Math.max(0, num(i.flare)) * k, skyBoost: num(i.skyBoost) * k,
+        bloom: Math.max(0, num(i.bloom)) * k, color: vec(i.color), rays: Math.max(0, num(i.rays)) * k, flare: Math.max(0, num(i.flare)) * k, skyBoost: num(i.skyBoost) * k,
       };
       return {};
     },

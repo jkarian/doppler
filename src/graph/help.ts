@@ -113,6 +113,7 @@ const HELP: Record<string, string> = {
   "Peaks.threshold": "How far above the recent level counts as a peak.",
   "Peaks.attack": "Seconds for the peak signal to rise.",
   "Peaks.release": "Seconds for it to fall back.",
+  "Sun.bloom": "Sunset bloom: a blown-out disc, a wide glow in the sun's colour and a horizontal streak, like a photo straight into a low sun. Hidden as much as the disc is.",
   "Sun.minArc": "Degrees: the lowest the sun sits while it's up for a drop (the skimming height, just over the ridge). It eases in as the sun rises, so it never pops. -90 = off.",
   "Sun.rise": "0..1: how far the sun is up for its moment; minArc applies in proportion.",
   "Setup.lead": "Seconds it switches on before its sections start, so something can ramp into the drop (laser fans opening onto the hit).",
