@@ -591,7 +591,10 @@ fn fs_blur(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   // The sun's channel (r) blurs only as much as its softness asks: a hard sun keeps crisp edges.
   var sunSum = 0.0;
   var sunW = 0.0;
-  let sunSigma2 = 2.0 * mix(0.3, 1.5, select(1.0, u.sunB.y, u.sun > 0.5)) * mix(0.3, 1.5, select(1.0, u.sunB.y, u.sun > 0.5));
+  // Never below about a texel: a hard sun barely blurred, and on grazing rock near the camera (the cave floor in
+  // bright moments) the march's jitter stayed as a visible dot pattern.
+  let sunSigma = mix(1.0, 1.8, select(1.0, u.sunB.y, u.sun > 0.5));
+  let sunSigma2 = 2.0 * sunSigma * sunSigma;
   for (var k = -R; k <= R; k++) {
     let t = clamp(texel + step * k, vec2i(0), vec2i(size) - 1);
     let zk = depthNearest((vec2f(t) + 0.5) / size);
@@ -614,15 +617,10 @@ fn fs_blur(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 // March from the surface toward the light and look for depth in the way.
 fn shadowAt(p: vec3f, toLight: vec3f, dist: f32, frag: vec2f, enclosed: bool, soft: f32) -> f32 {
   const STEPS = 128;  // more steps, less jitter to blur away (at true scale the rays are long)
-  // Fixed per-pixel jitter breaks step aliasing into fine grain. A hash, not interleaved gradient noise: at true scale
-  // the rays are long, and the gradient noise's regular pattern showed through the blur as a moire-like dot grid.
-  // No time term: same frame every run.
-  var h = bitcast<vec2u>(vec2i(frag));
-  h = h * 1664525u + 1013904223u;
-  h.x += h.y * 1664525u; h.y += h.x * 1664525u;
-  h = h ^ (h >> vec2u(16u));
-  h.x += h.y * 1664525u;
-  let jitter = f32(h.x & 0xffffffu) / 16777216.0;
+  // Fixed per-pixel jitter (interleaved gradient noise) breaks step aliasing into fine grain that the small blur
+  // dissolves. (A white-noise hash instead left visible grain on near rock; the dot grid the gradient noise showed on
+  // the long true-scale rays at 64 steps is gone at 128.) No time term: same frame every run.
+  let jitter = fract(52.9829189 * fract(dot(frag, vec2f(0.06711056, 0.00583715))));
   // March all the way to the light: the beam must stop at the first surface it meets, near or far.
   let maxLen = dist;
   var lit = 1.0;
