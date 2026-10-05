@@ -136,7 +136,7 @@ export interface SkyOut {
 
 export interface RenderOut {
   sky?: SkyOut;
-  water?: { speed: number; size: number; foam: number; ripple: number; sheen: number; glints: number; shininess: number };
+  water?: { speed: number; size: number; foam: number; ripple: number; sheen: number; glints: number; shininess: number; swirl: number };
   nooks?: NookOut;
   scan?: ScanOut;
   lasers?: LaserOut[];
@@ -1112,13 +1112,14 @@ const defs: NodeDef[] = [
       { name: "ripple", default: 0.35, min: 0, max: 2, step: 0.05, doc: "how much the ripples tilt the surface (normal map strength)" },
       { name: "sheen", default: 0.6, min: 0, max: 3, step: 0.05, doc: "sky reflection" },
       { name: "glints", default: 1, min: 0, max: 10, step: 0.1, doc: "sun highlights on the ripples" },
+      { name: "swirl", default: 1, min: 0, max: 5, step: 0.05, doc: "eddies: curl noise twisting the foam as it flows (0 straight streaks)" },
       { name: "shininess", default: 120, min: 4, max: 1000, step: 1, doc: "Blinn exponent: higher = smaller, sharper glints" },
     ],
     outputs: [],
     eval: (i, ctx) => {
       ctx.out.water = {
         speed: Math.max(0, num(i.speed)), size: Math.max(0.05, num(i.size)), foam: Math.max(0, num(i.foam)), ripple: Math.max(0, num(i.ripple)),
-        sheen: Math.max(0, num(i.sheen)), glints: Math.max(0, num(i.glints)), shininess: Math.max(1, num(i.shininess)),
+        sheen: Math.max(0, num(i.sheen)), glints: Math.max(0, num(i.glints)), shininess: Math.max(1, num(i.shininess)), swirl: Math.max(0, num(i.swirl)),
       };
       return {};
     },

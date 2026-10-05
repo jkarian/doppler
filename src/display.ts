@@ -1142,7 +1142,7 @@ async function main() {
       // Flowing water (Water node): speed and ripple size in metres, sheen, glints; foam, shininess, ripple strength.
       ...(graphOut.water
         ? [graphOut.water.speed / metersPerUnitScene, graphOut.water.size / metersPerUnitScene, graphOut.water.sheen, graphOut.water.glints,
-           graphOut.water.foam, graphOut.water.shininess, graphOut.water.ripple, 0]
+           graphOut.water.foam, graphOut.water.shininess, graphOut.water.ripple, graphOut.water.swirl]
         : [0, 0, 0, 0, 0, 0, 0, 0]),
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility

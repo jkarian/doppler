@@ -45,7 +45,7 @@ struct Uniforms {
   sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), laser reference distance, laser line width, time (s)
   hazeC: vec4f,        // aerial haze by hand: opacity at and beyond far, near, far (scene units), on (1/0); off: hazeBeta
   waterC: vec4f,       // flowing water: speed (scene units / s), ripple size (scene units), sheen (sky reflection), glints (Blinn)
-  waterD: vec4f,       // foam (rushing brightness), shininess (Blinn exponent), ripple strength (normal tilt), -
+  waterD: vec4f,       // foam (rushing brightness), shininess (Blinn exponent), ripple strength (normal tilt), swirl (curl noise)
 };
 
 // How much of a surface (or laser) at distance d shows through the air (1 = all). By hand (Sky node haze, near,
@@ -351,6 +351,19 @@ fn waterStreak(q: vec2f, dir: vec2f) -> f32 {
 
 // Flowing water (the river in the vista plate): a flow map. The ripple field slides along the river's course (dir, on
 // the ground) at speed; two copies half a cycle apart cross-fade so the sliding never stretches it over time.
+// Curl noise: the curl of a slowly drifting noise potential, a divergence-free field of eddies (no sources or
+// sinks), so whatever it moves wraps round itself in swirls instead of smearing.
+fn curlField(q: vec2f, t: f32) -> vec2f {
+  let s = u.waterC.y * 6.0;  // eddies a few ripple sizes across
+  let e = 0.15;
+  let p = q / s;
+  let z = t * 0.07;
+  let n0 = vnoise(vec3f(p, z));
+  let nx = vnoise(vec3f(p + vec2f(e, 0.0), z));
+  let ny = vnoise(vec3f(p + vec2f(0.0, e), z));
+  return vec2f(ny - n0, -(nx - n0)) / e;
+}
+
 fn waterHeight(q: vec2f, dir: vec2f) -> f32 {
   let period = 1.6;
   let ph = u.sunC.w / period;
@@ -358,8 +371,10 @@ fn waterHeight(q: vec2f, dir: vec2f) -> f32 {
   let fb = fract(ph + 0.5);
   let wa = 1.0 - abs(2.0 * fa - 1.0);
   let travel = period * u.waterC.x;
-  let ha = waterStreak(q - dir * fa * travel, dir);
-  let hb = waterStreak(q - dir * fb * travel + vec2f(13.7, 5.1) * u.waterC.y, dir);
+  // Each copy is carried along the river and twisted by the eddies over its life (flow map with a curl term).
+  let swirl = curlField(q, u.sunC.w) * u.waterD.w * u.waterC.y * 2.0;
+  let ha = waterStreak(q - dir * fa * travel - swirl * fa, dir);
+  let hb = waterStreak(q - dir * fb * travel - swirl * fb + vec2f(13.7, 5.1) * u.waterC.y, dir);
   return mix(hb, ha, wa);
 }
 
@@ -934,10 +949,15 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
     let th = textureSampleLevel(normalTex, samp, uv, 0.0).a * 6.2831853;  // downstream, full circle
     let g = vec2f(dot(p, side), dot(p, fwd));
     let dirG = vec2f(cos(th), sin(th));
+    // Feature size follows distance (smaller near, larger far: about the same size on screen), so the mid river
+    // doesn't show the eddies as big blobs. Reference: 900 m on true-scale scenes.
+    let dref = select(u.pivotZ * 10.0, 900.0, u.sunC.z > 0.0);
+    let k = clamp(pow(distance(p, u.camPos) / dref, 0.8), 0.25, 2.0);
+    let gk = g / k;
     let e = u.waterC.y * 0.15;
-    let h0 = waterHeight(g, dirG);
-    let hx = waterHeight(g + vec2f(e, 0.0), dirG) - h0;
-    let hy = waterHeight(g + vec2f(0.0, e), dirG) - h0;
+    let h0 = waterHeight(gk, dirG);
+    let hx = waterHeight(gk + vec2f(e, 0.0), dirG) - h0;
+    let hy = waterHeight(gk + vec2f(0.0, e), dirG) - h0;
     let nw = normalize(up - (side * hx + fwd * hy) * (u.waterD.z / 0.15));
     let vdir = normalize(u.camPos - p);
     // Rushing: white foam on the crests, added (the water never goes darker than the photo: no debossed band).
