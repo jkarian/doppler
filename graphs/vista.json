@@ -100,9 +100,9 @@
     300,
     20
    ],
-   "name": "Sun arc",
+   "name": "Sun arc: just below the gap, rising to its height for each drop",
    "params": {
-    "expr": "a - 6 + 4 * b + 12 * c + 2 * (e - 0.5)"
+    "expr": "a - 6 + b * (6 + c) + 2 * (e - 0.5)"
    }
   },
   {
@@ -186,7 +186,7 @@
    ],
    "name": "Flare",
    "params": {
-    "expr": "0.8 * a * b * c * (1 - 0.5 * d) * (0.85 + 0.3 * e) * (1 + 3 * f)"
+    "expr": "0.8 * a * b * c * (1 - 0.5 * d) * (0.85 + 0.3 * e) * (1 + 1.5 * f)"
    }
   },
   {
@@ -224,7 +224,7 @@
    "params": {
     "azimuth": 0,
     "enabled": 1,
-    "maxArc": 3,
+    "maxArc": 30,
     "floorLight": 0.1,
     "gain": 9.4,
     "bounce": 0.8,
@@ -811,7 +811,7 @@
     "breakdown": 0,
     "normal": 0,
     "outro": 0,
-    "drops": "-2",
+    "drops": "1 3",
     "lead": 0.2,
     "fadeIn": 0.2
    },
@@ -1025,6 +1025,42 @@
     "clearAt": "0.553,0.6",
     "nearSpeed": 0.333,
     "farSpeed": 2
+   }
+  },
+  {
+   "id": "sunRise",
+   "type": "Expression",
+   "pos": [
+    40,
+    1120
+   ],
+   "name": "Sun rise: up over 3 s into each drop, hold 5 s, down by 13 s",
+   "params": {
+    "expr": "max(1 - smoothstep(0, 3, c), 1 - smoothstep(5, 13, b))"
+   }
+  },
+  {
+   "id": "sunHeight",
+   "type": "Expression",
+   "pos": [
+    40,
+    1220
+   ],
+   "name": "Sun height above the gap: 2 deg at drop 1, +3 each drop",
+   "params": {
+    "expr": "2 + 3 * (a - 1 + step(c, b))"
+   }
+  },
+  {
+   "id": "midSpin",
+   "type": "Expression",
+   "name": "Drop 1 fan wave: near to far over 4 s (off in other drops)",
+   "pos": [
+    1300,
+    1000
+   ],
+   "params": {
+    "expr": "smoothstep(0, 4, a) * step(0.5, b) * step(b, 1.5) - 2 * step(1.5, b)"
    }
   }
  ],
@@ -1831,16 +1867,6 @@
   },
   {
    "from": [
-    "sunDrop",
-    "windup"
-   ],
-   "to": [
-    "arc",
-    "b"
-   ]
-  },
-  {
-   "from": [
     "sunTension",
     "energy"
    ],
@@ -1861,16 +1887,6 @@
   },
   {
    "from": [
-    "flareDrop",
-    "strength"
-   ],
-   "to": [
-    "flare",
-    "f"
-   ]
-  },
-  {
-   "from": [
     "sunDrop",
     "strength"
    ],
@@ -1887,26 +1903,6 @@
    "to": [
     "sunLift",
     "b"
-   ]
-  },
-  {
-   "from": [
-    "sunLift",
-    "value"
-   ],
-   "to": [
-    "arc",
-    "c"
-   ]
-  },
-  {
-   "from": [
-    "sunLift",
-    "value"
-   ],
-   "to": [
-    "sunAz",
-    "a"
    ]
   },
   {
@@ -1977,6 +1973,126 @@
    "to": [
     "megaRight",
     "camHit"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "seconds"
+   ],
+   "to": [
+    "sunRise",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "ahead"
+   ],
+   "to": [
+    "sunRise",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "number"
+   ],
+   "to": [
+    "sunHeight",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "seconds"
+   ],
+   "to": [
+    "sunHeight",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "ahead"
+   ],
+   "to": [
+    "sunHeight",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "sunRise",
+    "value"
+   ],
+   "to": [
+    "arc",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "sunHeight",
+    "value"
+   ],
+   "to": [
+    "arc",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "sunRise",
+    "value"
+   ],
+   "to": [
+    "flare",
+    "f"
+   ]
+  },
+  {
+   "from": [
+    "sunRise",
+    "value"
+   ],
+   "to": [
+    "sunAz",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "seconds"
+   ],
+   "to": [
+    "midSpin",
+    "a"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "number"
+   ],
+   "to": [
+    "midSpin",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "midSpin",
+    "value"
+   ],
+   "to": [
+    "skyBeams",
+    "wave"
    ]
   }
  ]

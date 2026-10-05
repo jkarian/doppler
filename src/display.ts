@@ -1270,6 +1270,7 @@ async function main() {
   // little while lit. While placing rigs it points straight down the cone's axis.
   // How far a rig has turned toward this step's new aim: eased over the first TURN_PART of the step.
   const TURN_PART = 0.3;
+  const WAVE_RAMP = 0.05; // of the wave: each rig opens over this part (~6 frames for a 4 s wave)
   const turnEase = (S: NonNullable<RenderOut["skyLasers"]>[number], step: number) => {
     const x = clamp((S.trigger - step) / TURN_PART, 0, 1);
     return x * x * (3 - 2 * x);
@@ -1345,7 +1346,15 @@ async function main() {
       d = normalize(d.map((x, j) => x * Math.cos(swing) + across[j] * Math.sin(swing)) as Vec3);
       // The plane's normal points the way it travels (the shader draws the trail behind it).
       const normal = normalize(cross(d, right)).map((x) => x * away) as Vec3;
-      const half = (S.scanSpread / 2) * rad;
+      // Wave: rigs ranked by distance fan out one after another as the wave passes them (nearest first).
+      let spread = S.scanSpread;
+      if (S.wave >= 0) {
+        const zs = (S.rigs ?? []).map((r) => depthAt(r[0], r[1]));
+        const rank = zs.filter((z) => z < zs[bi]).length / Math.max(1, zs.length - 1);
+        const x = clamp((S.wave * (1 + WAVE_RAMP) - rank * 1) / WAVE_RAMP, 0, 1);
+        spread = S.scanSpreadRest + (S.scanSpreadFull - S.scanSpreadRest) * x * x * (3 - 2 * x) * S.scanOpen;
+      }
+      const half = (spread / 2) * rad;
       const n = S.scanLines;
       const flick = 1 - S.flicker * Math.random();
       // Lens flare: the plane sweeping through the camera, inside the fan's spread (bright for a fraction of a degree).

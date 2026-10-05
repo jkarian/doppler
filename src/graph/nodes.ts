@@ -67,6 +67,10 @@ export interface SkyLaserOut {
   sweep: number; // degrees each scanning plane swings to either side (across its plane)
   sweepPhase: number; // cycles so far, including the extra speed from peaks
   sweepBoost: number; // multiplier on sweep from the current peak
+  wave: number; // 0..1: fans open rig by rig from near to far as it passes; < 0 off
+  scanSpreadRest: number; // degrees, closed
+  scanSpreadFull: number; // degrees, fully open
+  scanOpen: number; // 0..1: how far scanning has switched on (its setup's fade)
   sweepOneWay: number; // > 0.5: the planes sweep one way and restart (no back and forth)
   clearAt: number[]; // [u, v]: one-way scans change speed when their line passes this picture point
   nearSpeed: number; // speed before it (x)
@@ -281,15 +285,16 @@ const defs: NodeDef[] = [
     category: "Music",
     doc:
       "Drops: seconds since the last one, a hit that is 1 at the drop and decays, the hit scaled by how sure the analysis is (strength), " +
-      "seconds until the next one (ahead, 1e6 if none), and a wind-up that eases from 0 to 1 over the last `window` bars before it.",
+      "seconds until the next one (ahead, 1e6 if none), a wind-up that eases from 0 to 1 over the last `window` bars before it, " +
+      "and which drop it is (number: 0 before the first, then 1, 2, 3...).",
     inputs: [
       { name: "decay", default: 0.8, kind: "const", min: 0.05, max: 10, step: 0.05 },
       { name: "window", default: 4, kind: "const", min: 0.5, max: 32, step: 0.5, doc: "bars of wind-up before a drop" },
     ],
-    outputs: ["seconds", "hit", "strength", "ahead", "windup"],
+    outputs: ["seconds", "hit", "strength", "ahead", "windup", "number"],
     eval: (i, ctx) => {
       const m = ctx.music;
-      if (!m) return { seconds: 1e6, hit: 0, strength: 0, ahead: 1e6, windup: 0 };
+      if (!m) return { seconds: 1e6, hit: 0, strength: 0, ahead: 1e6, windup: 0, number: 0 };
       const last = m.lastDrop(ctx.t);
       const next = m.nextDrop(ctx.t);
       const hit = Math.exp(-last.since / num(i.decay));
@@ -301,6 +306,7 @@ const defs: NodeDef[] = [
         strength: hit * (last.drop?.confidence ?? 0),
         ahead: Number.isFinite(next.until) ? next.until : 1e6,
         windup: x * x * (3 - 2 * x),
+        number: m.drops().filter((d) => d.t <= ctx.t).length,
       };
     },
   },
@@ -835,6 +841,9 @@ const defs: NodeDef[] = [
       { name: "clearAt", default: "", kind: "const", doc: "one-way scans: a picture point u,v (e.g. the spire); the scan runs at nearSpeed until its line passes it, then at farSpeed" },
       { name: "nearSpeed", default: 1, min: 0.05, max: 10, step: 0.05, kind: "const", doc: "speed (x) while the line is nearer than clearAt" },
       { name: "farSpeed", default: 1, min: 0.05, max: 10, step: 0.05, kind: "const", doc: "speed (x) once the line has passed clearAt" },
+      { name: "wave", default: -1, min: -1, max: 1, step: 0.01, doc: "0..1: a wave through the rigs from the nearest to the farthest; each fans out (to scanSpreadPeak) as it passes. Below 0: off (fans follow peak)" },
+      { name: "spin", default: 0, min: 0, max: 1, step: 0.01, doc: "0..1: how far through its spin the fan is (wire an eased ramp); it turns spinAngle degrees around its beam's axis over it" },
+      { name: "spinAngle", default: 180, min: -720, max: 720, step: 5, kind: "const", doc: "degrees the fan turns around its beam over a full spin" },
       { name: "planeRoll", default: -1, min: -1, max: 180, step: 1, kind: "const", doc: "scanning planes: -1 random each step; else degrees from level (0: a flat fan spreading sideways, sweeping up and down)" },
       { name: "onVista", default: 0, min: 0, max: 1, step: 1, kind: "const", doc: "1: rigs stand out in the vista (behind the cave and pillars), on the plateau rims" },
       { name: "camHit", default: 0, min: 0, max: 1, step: 0.01, doc: "0..1: swings the planes toward the camera, so they sweep through the viewer (wire a moment here)" },
@@ -866,8 +875,9 @@ const defs: NodeDef[] = [
         // Speed changes are integrated (push is the peaks added up over time), so a faster swing never jumps.
         sweep: Math.max(0, num(i.sweep)), sweepPhase: Math.max(0, num(i.sweepSpeed)) * ctx.t + Math.max(0, num(i.peakFaster)) * num(i.peakPush),
         sweepBoost: 1 + Math.max(0, num(i.peakWider)) * clamp(num(i.peak), 0, 1),
+        wave: num(i.wave), scanSpreadRest: clamp(num(i.scanSpread), 0.2, 120), scanSpreadFull: clamp(num(i.scanSpreadPeak), 0.2, 120), scanOpen: smooth01(num(i.scan)),
         sweepOneWay: num(i.sweepOneWay), clearAt: String(i.clearAt ?? "").split(",").map(Number).filter(Number.isFinite),
-        nearSpeed: Math.max(0.05, num(i.nearSpeed)), farSpeed: Math.max(0.05, num(i.farSpeed)), planeRoll: num(i.planeRoll), onVista: num(i.onVista), camHit: clamp(num(i.camHit), 0, 1), flare: Math.max(0, num(i.flare)),
+        nearSpeed: Math.max(0.05, num(i.nearSpeed)), farSpeed: Math.max(0.05, num(i.farSpeed)), planeRoll: num(i.planeRoll) >= 0 ? num(i.planeRoll) + num(i.spinAngle) * clamp(num(i.spin), 0, 1) : num(i.planeRoll), onVista: num(i.onVista), camHit: clamp(num(i.camHit), 0, 1), flare: Math.max(0, num(i.flare)),
       });
       return {};
     },
