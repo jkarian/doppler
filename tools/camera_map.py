@@ -252,15 +252,21 @@ def layers(out: Path) -> None:
     W, H = info["width"], info["height"]
     desc = json.loads((out / "parts.json").read_text())
     L = np.log(np.fromfile(out / "depth.bin", dtype="<f4").reshape(H, W).astype(np.float64))
-    names, order, masks, standalone = [], {}, {}, {}
+    names, order, masks, standalone, sharp, hair, opn = [], {}, {}, {}, {}, {}, {}
     for part in desc["parts"]:
         lay = part["layer"]
         m = np.asarray(Image.open(out / "parts" / f"{part['name'].replace(' ', '_')}.png").convert("L")) > 127
         if lay not in masks:
-            names.append(lay); masks[lay] = np.zeros((H, W), bool); order[lay] = part["order"]; standalone[lay] = True
+            names.append(lay); masks[lay] = np.zeros((H, W), bool); order[lay] = part["order"]; standalone[lay] = True; sharp[lay] = True; hair[lay] = False; opn[lay] = True
         masks[lay] |= m
         order[lay] = min(order[lay], part["order"])
         standalone[lay] &= bool(part.get("freestanding", False))
+        # "outline": "sam" for see-through objects (glass, a translucent fin): BiRefNet cuts what's seen through them.
+        sharp[lay] &= part.get("outline", "birefnet") != "sam"
+        # "hair": true: fine see-through detail round the outline (hairs, fibres, wisps) goes with this layer as soft
+        # alpha. "open": true: open water or sky, no surface to stand on: the layer goes on the far card.
+        hair[lay] |= bool(part.get("hair", False))
+        opn[lay] &= bool(part.get("open", False))
     names.sort(key=lambda n: order[n])
     rest = names.index(desc.get("rest", names[0]))
     lab = np.full((H, W), -1)
@@ -278,6 +284,8 @@ def layers(out: Path) -> None:
     sky_px = L >= np.log(SKY_M * 0.98)
     cost = np.full((len(names), H, W), np.inf)
     for i in range(len(names)):
+        if standalone[names[i]] and not sharp[names[i]]:
+            continue  # a see-through object's SAM outline is final: depth (blurred across its edge) mustn't grow it
         if (lab == i).any():
             near = cv2.dilate((lab == i).astype(np.uint8), disk).astype(bool)
             land_i = (lab == i) & ~sky_px
@@ -298,7 +306,7 @@ def layers(out: Path) -> None:
     photo_rgb = np.asarray(Image.open(out / info["image"]).convert("RGB"))
     for i, n in enumerate(names[:-1]):
         m = lab == i
-        if not standalone[n] or m.sum() < 500:
+        if not standalone[n] or not sharp[n] or m.sum() < 500:
             continue
         cut = birefnet_cut(photo_rgb, m)
         if (cut & m).sum() < 0.5 * m.sum():
@@ -351,7 +359,7 @@ def layers(out: Path) -> None:
         zm = np.exp(L[m & (L < np.log(SKY_M * 0.98))])
         rng = [round(float(np.percentile(zm, 5)), 1), round(float(np.percentile(zm, 95)), 1)] if zm.size else None
         meta.append({"name": n, "prompt": desc.get("prompts", {}).get(n, ""), "freestanding": standalone[n] and i < len(names) - 1,
-                     "area": round(float(m.mean()), 4), "depth_m": rng})
+                     "area": round(float(m.mean()), 4), "depth_m": rng, "hair": hair[n], "open": opn[n] and i == len(names) - 1})
         print(f"  {n:6s} {m.mean() * 100:5.1f}% of the picture" + (f", {rng[0]}-{rng[1]} m" if rng else ""))
     img = Image.fromarray(over.clip(0, 255).astype(np.uint8))
     d = ImageDraw.Draw(img)
@@ -479,6 +487,55 @@ def fit_depth(ze: np.ndarray, known: np.ndarray, zk: np.ndarray, blur: float) ->
     return zl
 
 
+def smooth_backdrop(img: np.ndarray, known: np.ndarray, q: int = 8, scales=(30, 80, 250)) -> np.ndarray:
+    """Open water / clear sky over the whole canvas from its `known` pixels: normalized blurs at several scales,
+    the finer ones taking over wherever they have enough known pixels, so the fill follows the real water near it
+    and is only the broad gradient deep inside a hole (no outline of what stood in front). The real pixels go
+    through the same smooth field too (no seam where they meet the fill); only their fine detail (bokeh specks) is
+    added back. For soft, featureless backdrops: Flux paints an object into an object-shaped hole."""
+    Hc, Wc = known.shape
+    src = img.astype(np.float32)
+    k = cv2.resize(known.astype(np.float32), (Wc // q, Hc // q), interpolation=cv2.INTER_AREA)
+    c = cv2.resize(src * known[..., None], (Wc // q, Hc // q), interpolation=cv2.INTER_AREA)
+    f = None
+    for s in reversed(scales):  # coarse first
+        w = cv2.GaussianBlur(k, (0, 0), s / q, borderType=cv2.BORDER_REPLICATE)
+        n = cv2.GaussianBlur(c, (0, 0), s / q, borderType=cv2.BORDER_REPLICATE) / np.maximum(w, 1e-5)[..., None]
+        conf = np.clip(w / 0.3, 0, 1)[..., None]
+        f = n if f is None else n * conf + f * (1 - conf)
+    low = cv2.GaussianBlur(cv2.resize(f, (Wc, Hc), interpolation=cv2.INTER_CUBIC), (0, 0), q)
+    kn = known.astype(np.float32)
+    local = cv2.GaussianBlur(src * kn[..., None], (0, 0), 6) / np.maximum(cv2.GaussianBlur(kn, (0, 0), 6), 1e-4)[..., None]
+    fine = (src - local) * kn[..., None]
+    wk = cv2.GaussianBlur(cv2.erode(known.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(np.float32), (0, 0), 3)[..., None]
+    return (low + fine * wk).clip(0, 255).astype(np.uint8)
+
+
+def lift_hair(out: Path, lay: dict, photo: np.ndarray, clean: np.ndarray, band: np.ndarray) -> None:
+    """Difference key: what the photo has over the clean plate in `band` (brighter: glowing fibres, sparkles)
+    becomes soft alpha on the layer's image, its colour un-mixed from the plate; depth from the layer's nearest
+    real pixel, so the fibres recede with the body."""
+    rgba = np.asarray(Image.open(out / lay["image"])).copy()
+    Hc, Wc = band.shape
+    z = np.fromfile(out / lay["depth"], dtype="<f4").reshape(Hc, Wc)
+    p, c = photo.astype(np.float32), clean.astype(np.float32)
+    lum = lambda a: a @ np.array([0.299, 0.587, 0.114], np.float32)
+    lp, lc = lum(p), lum(c)
+    top = float(np.percentile(lp[band], 99.7))  # a fibre's full brightness
+    a = np.clip((lp - lc) / np.maximum(top - lc, 8.0), 0, 1)
+    a = np.where(a < 0.04, 0, (a - 0.04) / 0.96) * band  # below the plate's own noise: nothing
+    sel = (a > 0) & (rgba[..., 3] == 0)
+    col = np.clip(c + (p - c) / np.maximum(a, 0.04)[..., None], 0, 255)
+    rgba[sel, :3] = col[sel].astype(np.uint8)
+    rgba[sel, 3] = np.maximum(1, (a[sel] * 255).round()).astype(np.uint8)
+    solid = rgba[..., 3] == 255
+    _, (iy, ix) = ndi.distance_transform_edt(~solid, return_indices=True)
+    z[sel] = z[iy[sel], ix[sel]]
+    Image.fromarray(rgba, "RGBA").save(out / lay["image"])
+    z.astype("<f4").tofile(out / lay["depth"])
+    print(f"  {lay['name']}: lifted {sel.sum()} px of fibres (mean alpha {a[sel].mean():.2f}) from the clean plate")
+
+
 def paint(out: Path, border: float, reach: float, move: float, margin: float) -> None:
     info = json.loads((out / "scene.json").read_text())
     W, H = info["width"], info["height"]
@@ -496,6 +553,18 @@ def paint(out: Path, border: float, reach: float, move: float, margin: float) ->
     fov_x = float(np.degrees(2 * np.arctan((W + 2 * m) / 2 / f)))
     owns = [pad((np.asarray(Image.open(out / "layers" / f"{lay['name']}_mask.png")) > 127).astype(np.uint8)).astype(bool) for lay in meta]
     ellipse = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    # Hair: a band round a "hair" layer's outline, over the back layer's own pixels. The back layer is painted clean
+    # there (no fibres); at the end the fibres are pulled out of the photo against that clean plate (difference
+    # key) as soft alpha on the hair layer, at the depth of its nearest real pixel: they move with it.
+    hair_r = int(round(0.08 * max(W, H)))
+    bands = {i: cv2.dilate(owns[i].astype(np.uint8), ellipse(hair_r)).astype(bool) & ~owns[i] & owns[-1] & ~ring
+             for i, lay in enumerate(meta) if lay.get("hair") and i < len(meta) - 1}
+    for i in bands:  # nearer layers' pixels never take another layer's hair
+        for j in range(i):
+            bands[i] &= ~cv2.dilate(owns[j].astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    hair_px = np.zeros(ring.shape, bool)
+    for b in bands.values():
+        hair_px |= b
     nearer = np.zeros(ring.shape, bool)  # own pixels of the layers in front
     front_z = np.zeros(ring.shape)       # depth of the nearest layer in front, wherever one covers
     print(f"canvas {W + 2 * m}x{H + 2 * m} ({m} px border); camera move {move} m")
@@ -515,6 +584,8 @@ def paint(out: Path, border: float, reach: float, move: float, margin: float) ->
                 isl = (cc > 0) & (cc != main) & np.isin(cc, [c for c in range(1, k) if st[c, cv2.CC_STAT_AREA] < 0.005 * H * W])
                 own = own & ~isl
         back = i == len(meta) - 1
+        if back:
+            own = own & ~hair_px  # painted clean: its fibres go with the layer they grow from
         given_up = owns[i] & ~own  # choked edge and enclosed islands: this layer's, but painted
         hidden = nearer | ring | given_up
         # How far behind each layer in front the camera can see: f * move * (1/near - 1/far), with a safety margin.
@@ -531,17 +602,25 @@ def paint(out: Path, border: float, reach: float, move: float, margin: float) ->
             behind |= cv2.dilate(own.astype(np.uint8), ellipse(Rj)).astype(bool) & owns[j] & ~ring
         # The layer: its own pixels, plus what's hidden behind the layers in front up to R px from them, plus its
         # continuation past the frame's edges (the whole border). The back layer: everything.
-        past = cv2.dilate(own.astype(np.uint8), ellipse(m)).astype(bool) & ring
+        # Past the frame only from where the layer reaches the frame's edge (an object wholly in frame has nothing
+        # out there to continue).
+        at_edge = own & cv2.dilate(ring.astype(np.uint8), np.ones((9, 9), np.uint8)).astype(bool)
+        past = cv2.dilate(at_edge.astype(np.uint8), ellipse(m)).astype(bool) & ring
         keep = np.ones_like(own) if back else own | behind | past | given_up
         paint_px = keep & hidden & ~own
         print(f"{n}: {own[~ring].mean() * 100:.1f}% of the frame is its own; painting {paint_px.mean() * 100:.1f}% of the canvas"
               + ("" if back or not radii else f" (px behind: {', '.join(radii)})"))
         img = canvas.copy()
-        if paint_px.any():
+        if paint_px.any() and back and lay.get("open"):
+            # Open water / sky is out of focus and featureless: a smooth continuation of what's round the hole.
+            # Flux paints an object into an object-shaped hole (a ghost of what's in front).
+            img = smooth_backdrop(canvas, own & ~ring)
+        elif paint_px.any():
             # Exactly the hole (growing it into the real pixels and pasting them back leaves a hard join on the
             # outline). An object Flux paints into an object-shaped hole is caught by the SAM check below.
             img = flux_fill(canvas, hidden & ~own, lay["prompt"] or "natural photo, sharp detail, matching surroundings", seed=11 + i)
-        img[own] = canvas[own]
+        if not (back and lay.get("open")):  # open water is all one smooth field (see smooth_backdrop)
+            img[own] = canvas[own]
         ze, skye, _, _ = moge(img, fov_x=fov_x)
         if not back and paint_px.any():
             # A front layer keeps only painted pixels that continue it. Past the frame: anything but painted sky.
@@ -586,9 +665,14 @@ def paint(out: Path, border: float, reach: float, move: float, margin: float) ->
         covered = keep & (front_z > 0)
         zl[covered] = np.maximum(zl[covered], front_z[covered] * 1.08)  # always behind what's in front
         skyl = (skye & ~known) | (own & ~land_c) if back else np.zeros_like(own)
+        if back and lay.get("open"):
+            skyl = np.ones_like(own)  # open water / sky: all of it on the far card
         zl[skyl] = SKY_M
         Image.fromarray(np.dstack([img, keep.astype(np.uint8) * 255]), "RGBA").save(out / "layers" / f"{n}.png")
         zl.astype("<f4").tofile(out / "layers" / f"{n}_depth.bin")
+        if back:
+            for j, band in bands.items():
+                lift_hair(out, meta[j], canvas, img, band)
         Image.fromarray(skyl.astype(np.uint8) * 255).save(out / "layers" / f"{n}_sky.png")
         lay["image"], lay["depth"], lay["sky"] = f"layers/{n}.png", f"layers/{n}_depth.bin", f"layers/{n}_sky.png"
         front_z = np.where((front_z == 0) & keep & ~skyl, zl, front_z)
@@ -665,6 +749,8 @@ def export(out: Path, step: int, move: float, frames: int, period: int, fps: int
         skyl = np.asarray(Image.open(out / lay["sky"])) > 127
         keep = alpha & ~skyl
         if not keep.any():
+            if lay is meta[-1]:  # all open water / sky: no mesh, but the sky card wears its image
+                Image.open(out / lay["image"]).convert("RGB").save(dst / f"{n}.png")
             continue
         far_land = max(far_land, float(np.percentile(z[keep], 99.5)))
         # A little geometry past the outline (the projected alpha draws the exact edge), at the depth of the

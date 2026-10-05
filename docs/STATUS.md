@@ -1,10 +1,38 @@
 # Doppler Canyon: status and handoff
 
-Last updated 2026-10-05 (evening). Read this first when picking the project back up. Two threads: the
-**camera-mapping utility** (start with **Handoff 2026-10-05** below) and the canyon visualizer (**Handoff 2026-10-04
+Last updated 2026-10-05 (late evening). Read this first when picking the project back up. Two threads: the
+**camera-mapping utility** (start with **Whale shark 2026-10-05** and **Handoff 2026-10-05** below) and the canyon visualizer (**Handoff 2026-10-04
 night**; its real sunrise is still its next step).
 
-## Handoff 2026-10-05: camera-mapping utility (start here)
+## Whale shark 2026-10-05 (camera-mapping, third test image; the "hard one")
+
+`images/whale_shark.webp` -> `scenes/whale-shark` (scale x2: the user set the shark to 10 m nose to tail tip; MoGe
+said ~5 m). Export to open: `scenes/whale-shark/maya/v002/whale_shark_v002.ma` (v001 is missing the sky card's
+texture: export bug, fixed; v001 kept, ask before deleting). Not yet reviewed by the user in Maya.
+Layers: fin (near pectoral), shark (body + head + dorsal + tail, with fibres as soft alpha), farfin, water (open,
+on the far card at 22 m). Hard because it's see-through, has hair-like glowing fibres and an out-of-focus backdrop.
+
+New per-part options in parts.json (general, for any image):
+- `"outline": "sam"`: see-through objects (glassy fins). BiRefNet cuts what shows through them (holes, ragged
+  edges); SAM's outline stands and is final: depth (blurred across edges) no longer grows it into unclaimed pixels
+  (that was a dark bleed round the fin tip, which the user spotted).
+- `"hair": true`: fine see-through detail round the outline (fibres, fur, wisps). A band (8% of the frame) round the
+  layer is painted clean in the back layer, then the fibres are pulled out of the photo against that clean plate
+  (difference key, `lift_hair`) as soft alpha on the layer, at the depth of its nearest real pixel: they recede with
+  the body (the user's requirement). Maya takes the soft alpha through the projection's transparency.
+- `"open": true` (back layer): open water / clear sky. No mesh; all of it goes on the far card. Filled by
+  `smooth_backdrop` (multi-scale normalized blur of the real water, fine detail added back) instead of Flux: Flux
+  painted a sparkle ghost of the shark into the shark-shaped hole, and a plain inpaint left the shark's outline
+  (its glow). The real water goes through the same field, so there is no seam anywhere.
+- Layers are extended past the frame only from where they touch the frame's edge (the shark got blobs of water
+  painted above it otherwise).
+
+Open: parallax is the default +/-30 cm sway (gentle for a 10 m animal at 3-7 m; `export --move 1.0` if the user
+wants more); shark mesh ~460k triangles (NEXT 4); bokeh specks near the shark ride with it (lifted with the fibres).
+Commands, for redoing it: `measure`, `scale --factor 2`, parts.json (in scenes/, git-ignored), `segment_parts.py`,
+`layers`, `paint` (~6 min), `export`.
+
+## Handoff 2026-10-05: camera-mapping utility (base)
 
 **Goal (the user's words):** any image in -> a matte-painting camera projection: separate cut-out layers (fg/mg/bg...),
 each extended by inpainting behind what's in front and past the frame, real-size geometry per layer, a projection
