@@ -435,10 +435,11 @@ async function main() {
   const land = depth.filter((z) => z < info.far * 0.98).sort();
   const pct = (f: number) => (land.length ? land[Math.floor((land.length - 1) * f)] : info.far / 2);
   const pivotZ = pct(0.5);
-  // Laser widths are given as an angle at a reference distance. On a true-scale scene that distance is a fixed 500 m,
-  // so beams have a real thickness (0.03 deg = 0.26 m) and near ones read thicker than far ones; the scene's middle
-  // distance (~60 m here) made every beam a few cm, thinner than a pixel at any distance, so all looked the same.
-  const beamRefZ = info.metersPerUnit ? 500 / info.metersPerUnit : pivotZ;
+  // Laser widths are an angle at the scene's middle distance: thin crisp cores. Depth reads through brightness
+  // (laserNear in scene.wgsl), not thickness: real-width beams looked thick all the way through.
+  const beamRefZ = pivotZ;
+  // Where laser brightness is as tuned (nearer: brighter, further: fainter): about where the rigs stand.
+  const laserRefZ = info.metersPerUnit ? 200 / info.metersPerUnit : pct(0.8);
   // Depth of the rock around the camera: the sun's shadows treat anything this near as part of the cave.
   const caveDepth = pct(0.7) * 1.5;
   // Parallax range: how much more a near rock moves than the pivot, per unit of camera travel.
@@ -1113,7 +1114,7 @@ async function main() {
       ...skyUniforms(),
       look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, graphOut.sun?.caveDepth ?? 15,
       ...UP, bgBindGroups.length,
-      graphOut.sun?.terminator ?? 0, 0, 0, 0,
+      graphOut.sun?.terminator ?? 0, laserRefZ, 0, 0,
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     uniforms[55] = graphOut.sun?.detailBump ?? 0; // scanLines.w: fine rock relief from the photo's texture

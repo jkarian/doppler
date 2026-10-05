@@ -42,7 +42,7 @@ struct Uniforms {
   skyB: vec4f,         // sun height above the lowest open sky (degrees), lowest open sky (radians), span (radians), floor height (scene units)
   sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth, cave rock solid depth (fractions of distance)
   up: vec4f,           // true vertical in scene space (the photo's camera looks down a little); w: layers behind the main one
-  sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), -, -, -
+  sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), laser reference distance, -, -
 };
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
@@ -257,6 +257,15 @@ fn distanceFade(d: f32) -> f32 {
   return mix(1.0, 0.3, vistaDepth(d));
 }
 
+// Beams read their depth through brightness, like a laser show seen in haze: the part of a beam or fan near you is
+// bright, a source far away is faint, brightening as the beam comes toward you. Relative to the scene's middle
+// reference distance (sunC.y, about where the rigs stand): full as tuned there, up to x2.2 nearer, x0.4 at five
+// times as far, faint beyond.
+fn laserNear(t: f32) -> f32 {
+  if (u.sunC.y <= 0.0) { return 1.0; }
+  return clamp(pow(u.sunC.y / max(t, 1e-3), 0.6), 0.15, 2.2);
+}
+
 fn laserLight(p: vec3f, sky: bool) -> LaserLight {
   let cam = u.camPos;
   let toP = p - cam;
@@ -306,7 +315,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
           let rel = cam + tp * v - o;
           let a = atan2(dot(rel, side), dot(rel, d));
           if (abs(a) <= db.w && length(rel) < b.w / max(cos(a), 0.2)) {
-            g += 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * distanceFade(tp) * reachFade(tp, L.reach); // faint haze
+            g += 0.012 * min(6.0, 1.0 / max(abs(vn), 0.03)) * distanceFade(tp) * reachFade(tp, L.reach) * laserNear(tp); // faint haze
           }
         }
         if (!sky) {
@@ -329,7 +338,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       let edgeLine = bi == 0u || bi + 1u == n;
       let drawn = !scanned || edgeLine;
       // The air veils the far parts of a beam like the far land (aerial perspective).
-      g += select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen * exp(-u.hazeBeta * t);
+      g += select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen * exp(-u.hazeBeta * t) * laserNear(t);
       // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
       if (db.w < 0.0) {
         let to = dot(o - cam, v);
@@ -369,10 +378,10 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
             // distance as the beams.
             let e = abs(a) / max(L.halfSpread, 1e-4);
             let dwell = 0.5 + 0.5 * min(4.0, inverseSqrt(max(1.0 - e * e, 1e-3)));
-            g += (L.sheet - 1.0) * 0.06 * dwell * through * distanceFade(tp);
+            g += (L.sheet - 1.0) * 0.06 * dwell * through * distanceFade(tp) * laserNear(tp);
           } else {
             // Faint: light scattered by haze. The contour lines and edges carry the shape.
-            g += L.sheet * 0.012 * through * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp) * reachFade(tp, L.reach);
+            g += L.sheet * 0.012 * through * exp(-length(rel) / (u.far * 0.08)) * distanceFade(tp) * reachFade(tp, L.reach) * laserNear(tp);
           }
         }
       }
