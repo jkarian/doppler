@@ -66,7 +66,20 @@ def main() -> None:
     # A painted mask wins (white = water, the plate's framing, any size): images/river_mask.png or the second argument.
     painted = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("images/river_mask.png")
     if painted.exists():
-        m = np.asarray(Image.open(painted).convert("L").resize((W, H), Image.LANCZOS)) / 255.0
+        im = Image.open(painted)
+        alpha = np.asarray(im.convert("RGBA").resize((W, H), Image.LANCZOS))[..., 3].astype(np.float64)
+        rgb = np.asarray(im.convert("RGB").resize((W, H), Image.LANCZOS)).astype(np.float64)
+        if alpha.min() < 128 and alpha.max() > 128:
+            m = alpha / 255.0  # white strokes on transparency
+        elif (rgb.std(-1) > 12).mean() > 0.05:
+            # Painted over a picture (white strokes on the photo), not a black-and-white mask: water is where it's
+            # near-pure white and differs from the scene's own photo.
+            ref = np.asarray(Image.open(scene / info["image"]).convert("RGB")).astype(np.float64)
+            white = (rgb.min(-1) > 235) & (rgb.max(-1) - rgb.min(-1) < 12)
+            changed = np.abs(rgb - ref).mean(-1) > 18
+            m = ndi.binary_closing(white & changed, iterations=2).astype(np.float64)
+        else:
+            m = rgb.mean(-1) / 255.0
         water = cv2.GaussianBlur(m.astype(np.float32), (0, 0), 1.5).astype(np.float64)
         print(f"  water from the painted mask {painted}")
     Image.fromarray(np.dstack([alb[..., :3], np.round(255 * (1 - water)).astype(np.uint8)])).save(scene / vista["albedo"])

@@ -224,14 +224,16 @@
    "params": {
     "azimuth": 0,
     "enabled": 1,
-    "maxArc": 30,
+    "maxArc": 18.5,
     "floorLight": 0.1,
-    "gain": 9.4,
-    "bounce": 0.8,
+    "gain": 5.8,
+    "bounce": 0.2,
     "shadowDepth": 0.5,
     "shadowSoftness": 0.05,
     "caveDepth": 5,
-    "floorBelow": -200
+    "floorBelow": -350,
+    "terminator": 0.85,
+    "minArc": 27
    }
   },
   {
@@ -768,7 +770,7 @@
    "type": "SunTint",
    "name": "Sun colour by height",
    "params": {
-    "warmth": 0.7
+    "warmth": 2
    },
    "pos": [
     620,
@@ -2155,6 +2157,16 @@
    "to": [
     "above",
     "e"
+   ]
+  },
+  {
+   "from": [
+    "sunRise",
+    "value"
+   ],
+   "to": [
+    "sun",
+    "rise"
    ]
   }
  ]

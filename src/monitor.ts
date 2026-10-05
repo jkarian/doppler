@@ -186,6 +186,8 @@ export function createMonitor(o: MonitorOptions) {
   // Master sliders: the few settings you reach for most, always in view.
   const MASTER: { type: string; param: string; label: string; min: number; max: number; step: number }[] = [
     { type: "Sun", param: "gain", label: "sun", min: 0, max: 10, step: 0.05 },
+    { type: "Sun", param: "minArc", label: "sun min (skim)", min: -30, max: 30, step: 0.5 },
+    { type: "Sun", param: "maxArc", label: "sun max", min: -30, max: 90, step: 0.5 },
     { type: "Sun", param: "azimuth", label: "sun direction", min: -60, max: 60, step: 0.5 },
     { type: "Sun", param: "bounce", label: "bounce", min: 0, max: 2, step: 0.05 },
     { type: "Sun", param: "floorLight", label: "floor light", min: 0, max: 1, step: 0.05 },
