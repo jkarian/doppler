@@ -50,6 +50,8 @@ HAZE_VISIBILITY_M = 150_000.0  # how far the air lets you see: sets the haze on 
 EDGE_PX = 2  # cut-outs lose this much of their outline (scene pixels): the blended edge pixels made a halo
 NORMAL_BAND_PX = 4  # and their normals come from this much further in (edge normals turn sideways: a lit rim)
 MARKUP_HOLE_PX = 20_000  # unpainted spots in the cave markup smaller than this (scene pixels) count as cave
+DEHAZE_MIN_T = 0.55  # the plate's dehazing removes at most this much of the haze (1 - this)
+MOUNTAIN_M = 6000.0  # land beyond this counts as the distant mountains (--mountains)
 KEPT_ERODE_PX = 3  # the kept strip loses this much (scene pixels) to the near rock: its rim moves with it
 
 
@@ -62,6 +64,7 @@ def main() -> None:
     ap.add_argument("--pillars", type=Path, help="cut-out of the pillars and spire (PNG with transparency, the photo's framing)")
     ap.add_argument("--markup", type=Path, default=Path("images/markup_layers.webp"), help="layer markup (frame vs pillars)")
     ap.add_argument("--resolution-level", type=int, default=9)
+    ap.add_argument("--mountains", type=float, default=1.0, help="scale the distant mountains' height (e.g. 0.33: a third, on the same base line; the sky moves down)")
     args = ap.parse_args()
 
     info = json.loads((args.scene / "scene.json").read_text())
@@ -157,6 +160,38 @@ def main() -> None:
     if hole.any():
         _, (iy, ix) = ndi.distance_transform_edt(~land, return_indices=True)
         z_plate[hole] = z_plate[iy, ix][hole]
+    if args.mountains < 0.999:
+        # Lower the distant mountains: squash each column's mountain band (land beyond MOUNTAIN_M) onto its base line
+        # and move the sky down over the freed rows; then build everything again from the new plate.
+        mtn = ndi.binary_opening(land & (z_plate > MOUNTAIN_M), iterations=2)
+        new = plate.copy()
+        cols = np.nonzero(mtn.any(0))[0]
+        tops = np.full(W, -1)
+        bots = np.full(W, -1)
+        for x in cols:
+            r = np.nonzero(mtn[:, x])[0]
+            tops[x], bots[x] = r.min(), r.max()
+        ok = tops >= 0
+        tops[ok] = ndi.median_filter(tops, 15)[ok]
+        bots[ok] = ndi.median_filter(bots, 15)[ok]
+        for x in np.nonzero(ok)[0]:
+            top, bot = int(tops[x]), int(bots[x])
+            h = bot - top + 1
+            nh = max(1, int(round(h * args.mountains)))
+            src = plate[top:bot + 1, x].astype(np.float32)
+            idx = np.linspace(0, h - 1, nh)
+            band = np.stack([np.interp(idx, np.arange(h), src[:, c]) for c in range(3)], -1)
+            new[bot - nh + 1:bot + 1, x] = band.round().astype(np.uint8)
+            shift = h - nh
+            rows = np.arange(0, bot - nh + 1)
+            new[rows, x] = plate[np.maximum(rows - shift, 0), x]
+        lowered = args.out / "plate_mountains.png"
+        args.out.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(new).save(lowered)
+        print(f"  mountains scaled to {args.mountains:.2f} of their height ({ok.sum()} columns): rebuilding from {lowered}")
+        sys.argv = [a if a != str(args.plate) else str(lowered) for a in sys.argv]
+        sys.argv = [a for k, a in enumerate(sys.argv) if not (a == "--mountains" or (k and sys.argv[k - 1] == "--mountains"))]
+        return main()
     print(f"  log depth stretch {a:.2f}; MoGe far/near {np.exp(np.quantile(np.log(zm[land]), 0.98) - np.quantile(np.log(zm[land]), 0.02)):.0f}x, "
           f"mapped {np.quantile(z_plate[land], 0.02):.0f}-{np.quantile(z_plate[land], 0.98):.0f} m")
 
@@ -190,8 +225,10 @@ def main() -> None:
         if spread < best[0]:
             best = (spread, beta)
     beta = best[1]
-    t = np.exp(-beta * np.where(land, z_plate, 0))[..., None]
-    plate_clear = np.clip((Lp - airlight * (1 - t)) / np.maximum(t, 0.15), 0, 1)
+    # Remove at most about half the haze: at mountain distances almost nothing of the land's colour survives the air,
+    # and dividing it back out blew the colours up (saturated blue mountains, cyan rims).
+    t = np.maximum(np.exp(-beta * np.where(land, z_plate, 0)), DEHAZE_MIN_T)[..., None]
+    plate_clear = np.clip((Lp - airlight * (1 - t)) / t, 0, 1)
     pil = pillars if pillars.any() else ref
     # Brightness only (one number for all channels): the painting keeps its own hues (blue water, green brush); a
     # per-channel gain from the red pillars took the blue out of the river.
