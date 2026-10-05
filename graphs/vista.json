@@ -100,9 +100,9 @@
     300,
     20
    ],
-   "name": "Sun arc: just below the gap, rising to its height for each drop",
+   "name": "Sun arc: just below the gap, rising to its height for each drop (tension sways it only at rest)",
    "params": {
-    "expr": "a - 6 + b * (6 + c) + 2 * (e - 0.5)"
+    "expr": "a - 6 + b * (6 + c) + 2 * (e - 0.5) * (1 - b)"
    }
   },
   {
@@ -124,9 +124,9 @@
     300,
     380
    ],
-   "name": "Above horizon",
+   "name": "Sun above the gap (0..1), dimmed in early drops: half at drop 1, 0.8 at drop 2, full from drop 3 (the lasers carry drop 1)",
    "params": {
-    "expr": "clamp((a + 6) / 10, 0, 1)"
+    "expr": "clamp((a + 6) / 10, 0, 1) * (1 - e * (1 - min(1, 0.5 + 0.3 * (b - 1 + step(d, c)))))"
    }
   },
   {
@@ -1050,9 +1050,9 @@
     40,
     1220
    ],
-   "name": "Sun height above the gap: 2 deg at drop 1, +3 each drop",
+   "name": "Sun height above the gap: 3 deg at drop 1 (just clear of the ridge), +2 each drop up to 7 (drop 3; higher hides behind the cave ceiling)",
    "params": {
-    "expr": "2 + 3 * (a - 1 + step(c, b))"
+    "expr": "min(7, 3 + 2 * (a - 1 + step(c, b)))"
    }
   },
   {
@@ -2115,6 +2115,46 @@
    "to": [
     "skyBeams",
     "wave"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "number"
+   ],
+   "to": [
+    "above",
+    "b"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "seconds"
+   ],
+   "to": [
+    "above",
+    "c"
+   ]
+  },
+  {
+   "from": [
+    "sunDrop",
+    "ahead"
+   ],
+   "to": [
+    "above",
+    "d"
+   ]
+  },
+  {
+   "from": [
+    "sunRise",
+    "value"
+   ],
+   "to": [
+    "above",
+    "e"
    ]
   }
  ]
