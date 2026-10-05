@@ -450,7 +450,7 @@ async function main() {
   // Where laser brightness is as tuned (nearer: brighter, further: fainter): about where the rigs stand.
   const laserRefZ = info.metersPerUnit ? 200 / info.metersPerUnit : pct(0.8);
   // Width of the line a laser plane draws on the rock: about 3 inches on true-scale scenes (0: the old look).
-  const laserLineW = info.metersPerUnit ? 0.076 / info.metersPerUnit : 0;
+  const laserLineW = info.metersPerUnit ? 0.051 / info.metersPerUnit : 0; // 2 inches
   // Depth of the rock around the camera: the sun's shadows treat anything this near as part of the cave.
   const caveDepth = pct(0.7) * 1.5;
   // Parallax range: how much more a near rock moves than the pivot, per unit of camera travel.
@@ -1227,7 +1227,7 @@ async function main() {
   const rad = Math.PI / 180;
   // fromBehind: the source stands behind nearer rock (a rig out in the vista): hits count only once the beam has
   // come out into the open, so it isn't stopped by the cave rim it starts behind.
-  const beamLength = (o: Vec3, d: Vec3, maxLen: number, depthAt = depthAtMain, fromBehind = false): number => {
+  const beamLength = (o: Vec3, d: Vec3, maxLen: number, depthAt = depthAtMain, fromBehind = false, solidity?: number): number => {
     const steps = 160;
     let prev = 0;
     let free = !fromBehind;
@@ -1242,7 +1242,7 @@ async function main() {
       // Behind a surface counts as inside rock only for so deep: thick for the cave walls around us, thin for
       // far ridges (like the sun's shadows), so beams aimed up clear distant rims and reach the sky.
       const f = Math.min(1, Math.max(0, (z - caveDepth) / (2 * caveDepth)));
-      const solid = 2 - 1.75 * f * f * (3 - 2 * f);
+      const solid = solidity ?? 2 - 1.75 * f * f * (3 - 2 * f);
       if (q[2] < z * 0.99) free = true;
       if (free && z < info.far * 0.98 && q[2] > z * 1.01 && q[2] < z * (1 + solid)) {
         // Refine between the last free step and this one.
@@ -1303,14 +1303,17 @@ async function main() {
       // Back and forth, or one way (sawtooth) blanking near the ends so the restart doesn't show.
       const ph = S.sweepPhase + bi * 0.3;
       const saw = ph - Math.floor(ph);
-      let swing = S.sweep * S.sweepBoost * rad * (S.sweepOneWay > 0.5 ? 2 * saw - 1 : Math.sin(2 * Math.PI * S.sweepPhase + bi * 1.9));
+      // One-way scans always travel away from the viewer (deeper into the scene), both rigs alike.
+      const away = S.sweepOneWay > 0.5 && dot(across, FWD) < 0 ? -1 : 1;
+      let swing = away * S.sweep * S.sweepBoost * rad * (S.sweepOneWay > 0.5 ? 2 * saw - 1 : Math.sin(2 * Math.PI * S.sweepPhase + bi * 1.9));
       const blank = S.sweepOneWay > 0.5 ? Math.min(1, saw / 0.04, (1 - saw) / 0.04) : 1;
       // Camera hit: swing toward the angle at which the plane passes through the camera.
       const cam = camPos(time);
       const toCam = normalize([cam[0] - o[0], cam[1] - o[1], cam[2] - o[2]]);
       if (S.camHit > 0) swing += (Math.atan2(dot(toCam, across), dot(toCam, d)) - swing) * S.camHit;
       d = normalize(d.map((x, j) => x * Math.cos(swing) + across[j] * Math.sin(swing)) as Vec3);
-      const normal = normalize(cross(d, right));
+      // The plane's normal points the way it travels (the shader draws the trail behind it).
+      const normal = normalize(cross(d, right)).map((x) => x * away) as Vec3;
       const half = (S.scanSpread / 2) * rad;
       const n = S.scanLines;
       const flick = 1 - S.flicker * Math.random();
@@ -1327,7 +1330,8 @@ async function main() {
         const a = -half + (2 * half * k) / (n - 1);
         const dk = normalize(d.map((x, j) => x * Math.cos(a) + right[j] * Math.sin(a)) as Vec3);
         // The middle line also marks the rig itself (a small bright source).
-        laserData.set([...o, beamLength(o, dk, maxLen, depthAtMain, onVista), ...dk, k === n >> 1 ? -1 : 0], beamSlot(li, k));
+        // Rigs out in the vista stop on the vista's own rock (what really stands behind the cave), thin like far ridges.
+        laserData.set([...o, beamLength(o, dk, maxLen, onVista ? vistaDepthAt : depthAtMain, onVista, onVista ? 0.25 : undefined), ...dk, k === n >> 1 ? -1 : 0], beamSlot(li, k));
       }
       li++;
     }

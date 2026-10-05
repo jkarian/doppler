@@ -452,10 +452,21 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       if (!sky) {
         let rel = p - L.origin;
         let a = atan2(dot(rel, L.right), dot(rel, L.aim));
-        if (abs(a) <= L.halfSpread && length(rel) <= fanLength(li, n, a, L.halfSpread) * 1.03 + 0.02) {
+        let scannedPlane = L.sheet > 1.0;
+        if (abs(a) <= L.halfSpread && length(rel) <= fanLength(li, n, a, L.halfSpread) * select(1.03, 1.4, scannedPlane) + 0.02) {
           let off = dot(rel, L.normal);
           let lw = lineWidth(distance(p, cam), 0.0025 * distance(p, cam) + 0.002);
-          r += min(L.sheet, 2.0) * L.hit * lw.y * (2.5 * exp(-pow(off / lw.x, 2.0)) + 0.3 * exp(-pow(off / (lw.x * 4.0), 2.0)));
+          let line = min(L.sheet, 2.0) * L.hit * lw.y * (2.5 * exp(-pow(off / lw.x, 2.0)) + 0.3 * exp(-pow(off / (lw.x * 4.0), 2.0)));
+          r += line;
+          // A scanning plane's line also adds on top as light (after the brightness cap), so the fan's veil in the air
+          // can't wash it out.
+          if (scannedPlane) { g += line * 0.35 * distanceFade(length(toP)); }
+          // A scanning plane leaves a fading trail on the rock behind the line, like the MRI scan's (the plane moves
+          // toward +normal): it shows which way the scan travels. Measured as an angle from the rig.
+          if (scannedPlane && off < 0.0) {
+            let y = (-off / max(length(rel), 1e-3)) / 0.06;
+            r += L.hit * 0.9 * (0.75 * exp(-y / 0.04) + 0.25 * exp(-y / 0.3));
+          }
         }
       }
     }
