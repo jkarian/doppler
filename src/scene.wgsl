@@ -44,6 +44,8 @@ struct Uniforms {
   up: vec4f,           // true vertical in scene space (the photo's camera looks down a little); w: layers behind the main one
   sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), laser reference distance, laser line width, time (s)
   hazeC: vec4f,        // aerial haze by hand: opacity at and beyond far, near, far (scene units), on (1/0); off: hazeBeta
+  waterC: vec4f,       // flowing water: speed (scene units / s), ripple size (scene units), sheen (sky reflection), glints (Blinn)
+  waterD: vec4f,       // foam (rushing brightness), shininess (Blinn exponent), ripple strength (normal tilt), -
 };
 
 // How much of a surface (or laser) at distance d shows through the air (1 = all). By hand (Sky node haze, near,
@@ -326,6 +328,16 @@ fn airDensity(q: vec3f) -> f32 {
   let drift = vec3f(0.25, 0.04, 0.12) * s * u.sunC.w;     // a breeze: slow drift through the canyon
   let n = 0.65 * vnoise((q + drift) / (10.0 * s)) + 0.35 * vnoise((q + drift * 1.7) / (2.2 * s) + 17.0);
   return mix(0.35, 1.55, smoothstep(0.2, 0.8, n));
+}
+
+// Flowing water (the river in the vista plate): a ripple height field in world space, streaked along the flow and
+// moving downstream (toward the camera here), whose slopes make the water's normal map.
+fn waterHeight(q: vec2f) -> f32 {
+  let t = u.sunC.w * u.waterC.x;
+  // Long streaks along the flow (q.y), fine across it; a second, faster finer layer for chop.
+  let a = vnoise(vec3f(q.x / u.waterC.y, (q.y + t) / (u.waterC.y * 4.0), 0.5));
+  let b = vnoise(vec3f(q.x / (u.waterC.y * 0.35), (q.y + t * 1.6) / (u.waterC.y * 1.2), 7.3));
+  return 0.65 * a + 0.35 * b;
 }
 
 // Where a laser plane cuts the rock: a line of real width (sunC.z, scene units: about 3 inches on true-scale scenes),
@@ -882,6 +894,34 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   }
   let base = select(mix(albedo * ambient, photo, u.baked), skyColor * (1.0 + u.skyBoost), sky);
   var color = base * u.baseDim + albedo * light;
+
+  // Flowing water: where the vista plate marks water (its albedo's alpha), ripples moving downstream make a normal map;
+  // foam brightens the crests (rushing), the surface reflects the sky (sheen, stronger at grazing angles) and the sun
+  // glints off it (Blinn-Phong).
+  let water = 1.0 - textureSample(albedoTex, samp, uv).a;
+  if (water > 0.01 && !sky && u.waterC.y > 0.0) {
+    let up = u.up.xyz;
+    let fwd = normalize(vec3f(0.0, 0.0, 1.0) - up * up.z);  // level, into the scene: the river flows toward us (-fwd)
+    let side = cross(up, fwd);
+    let q = vec2f(dot(p, side), dot(p, fwd));
+    let e = u.waterC.y * 0.15;
+    let h0 = waterHeight(q);
+    let hx = waterHeight(q + vec2f(e, 0.0)) - h0;
+    let hy = waterHeight(q + vec2f(0.0, e)) - h0;
+    let nw = normalize(up - (side * hx + fwd * hy) * (u.waterD.z / 0.15));
+    let vdir = normalize(u.camPos - p);
+    // Rushing: foam on the crests.
+    color *= mix(1.0, 0.75 + u.waterD.x * smoothstep(0.45, 0.85, h0), water);
+    // Sheen: the sky reflected, Fresnel (Schlick, water ~2%) so it grows toward grazing angles.
+    let r = reflect(-vdir, nw);
+    let fres = 0.02 + 0.98 * pow(1.0 - max(dot(nw, vdir), 0.0), 5.0);
+    let skyR = skyGradient(project(u.camPos + r * u.far)) * u.skyA.y * (1.0 + u.skyBoost);
+    color += water * u.waterC.z * fres * skyR * u.baseDim * 3.0;
+    // Glints: Blinn-Phong highlight of the sun (or spot) on the rippled surface, in its shadow only where lit.
+    let hv = normalize(hit.l + vdir);
+    let spec = pow(max(dot(nw, hv), 0.0), u.waterD.y) * hit.amount * shadow;
+    color += water * u.waterC.w * spec * u.lightColor * u.intensity;
+  }
   // Aerial perspective: far land fades toward the sky's own colour at its height in the picture (the air between
   // glows like the sky behind it), so distant ridges sit back instead of reading as black cut-outs against the
   // gradient. Follows the gradient, so dusk mountains go rosy grey and day ones blue.

@@ -136,6 +136,7 @@ export interface SkyOut {
 
 export interface RenderOut {
   sky?: SkyOut;
+  water?: { speed: number; size: number; foam: number; ripple: number; sheen: number; glints: number; shininess: number };
   nooks?: NookOut;
   scan?: ScanOut;
   lasers?: LaserOut[];
@@ -1091,6 +1092,31 @@ const defs: NodeDef[] = [
         mix: clamp(num(i.mix), 0, 1), brightness: Math.max(0, num(i.brightness)), clouds: clamp(num(i.clouds), 0, 1),
         glow: Math.max(0, num(i.glow)), span: Math.max(1, num(i.span)), visibility: Math.max(0, num(i.visibility)),
         haze: num(i.haze) < 0 ? -1 : clamp(num(i.haze), 0, 1), hazeNear: Math.max(1, num(i.hazeNear)), hazeFar: Math.max(num(i.hazeNear) * 1.01, num(i.hazeFar)),
+      };
+      return {};
+    },
+  },
+  {
+    type: "Water",
+    category: "Output",
+    doc:
+      "Flowing water where the scene marks water (the river in the vista plate): ripples in world space streak along the " +
+      "flow and move downstream at speed; foam brightens their crests (rushing); the surface reflects the sky (sheen, " +
+      "stronger at grazing angles) and the sun glints off the ripples (Blinn-Phong, shininess).",
+    inputs: [
+      { name: "speed", default: 4, min: 0, max: 30, step: 0.1, doc: "metres per second downstream" },
+      { name: "size", default: 3, min: 0.2, max: 50, step: 0.1, doc: "metres: ripple size across the flow (streaks are 4x longer along it)" },
+      { name: "foam", default: 0.6, min: 0, max: 2, step: 0.05, doc: "how much the crests brighten (rushing white water)" },
+      { name: "ripple", default: 0.35, min: 0, max: 2, step: 0.05, doc: "how much the ripples tilt the surface (normal map strength)" },
+      { name: "sheen", default: 0.6, min: 0, max: 3, step: 0.05, doc: "sky reflection" },
+      { name: "glints", default: 1, min: 0, max: 10, step: 0.1, doc: "sun highlights on the ripples" },
+      { name: "shininess", default: 120, min: 4, max: 1000, step: 1, doc: "Blinn exponent: higher = smaller, sharper glints" },
+    ],
+    outputs: [],
+    eval: (i, ctx) => {
+      ctx.out.water = {
+        speed: Math.max(0, num(i.speed)), size: Math.max(0.05, num(i.size)), foam: Math.max(0, num(i.foam)), ripple: Math.max(0, num(i.ripple)),
+        sheen: Math.max(0, num(i.sheen)), glints: Math.max(0, num(i.glints)), shininess: Math.max(1, num(i.shininess)),
       };
       return {};
     },

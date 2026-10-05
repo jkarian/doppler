@@ -1066,6 +1066,24 @@
    "params": {
     "expr": "smoothstep(0, 4, a) * step(0.5, b) * step(b, 1.5) - 2 * step(1.5, b)"
    }
+  },
+  {
+   "id": "water",
+   "type": "Water",
+   "name": "River",
+   "pos": [
+    620,
+    1250
+   ],
+   "params": {
+    "speed": 5,
+    "size": 5,
+    "foam": 1.0,
+    "ripple": 0.5,
+    "sheen": 1.0,
+    "glints": 1,
+    "shininess": 120
+   }
   }
  ],
  "wires": [

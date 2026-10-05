@@ -273,7 +273,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 80;
+  const UNIFORM_FLOATS = 88;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
   const LASER_FIXTURES = 16; // matches `Lasers` in scene.wgsl: scanning rigs take one fixture each
   const LASER_FLOATS = 4 + LASER_FIXTURES * 24 + LASER_FIXTURES * 24 * 2 * 4;
@@ -1132,6 +1132,11 @@ async function main() {
       ...(graphOut.sky && graphOut.sky.haze >= 0
         ? [graphOut.sky.haze, graphOut.sky.hazeNear / metersPerUnitScene, graphOut.sky.hazeFar / metersPerUnitScene, 1]
         : [0, 0, 0, 0]),
+      // Flowing water (Water node): speed and ripple size in metres, sheen, glints; foam, shininess, ripple strength.
+      ...(graphOut.water
+        ? [graphOut.water.speed / metersPerUnitScene, graphOut.water.size / metersPerUnitScene, graphOut.water.sheen, graphOut.water.glints,
+           graphOut.water.foam, graphOut.water.shininess, graphOut.water.ripple, 0]
+        : [0, 0, 0, 0, 0, 0, 0, 0]),
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     uniforms[55] = graphOut.sun?.detailBump ?? 0; // scanLines.w: fine rock relief from the photo's texture

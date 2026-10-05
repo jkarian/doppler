@@ -195,6 +195,9 @@ export function createMonitor(o: MonitorOptions) {
     { type: "Tone", param: "cap", label: "brightness cap", min: 0.2, max: 10, step: 0.05 },
     { type: "NookLights", param: "intensity", label: "nook lights", min: 0, max: 20, step: 0.05 },
     { type: "Sky", param: "brightness", label: "sky", min: 0, max: 20, step: 0.1 },
+    { type: "Sky", param: "haze", label: "haze", min: 0, max: 1, step: 0.01 },
+    { type: "Sky", param: "hazeNear", label: "haze near (m)", min: 10, max: 5000, step: 10 },
+    { type: "Sky", param: "hazeFar", label: "haze far (m)", min: 500, max: 100000, step: 100 },
     { type: "Sync", param: "lead", label: "audio sync (ms, + = visuals earlier)", min: -200, max: 200, step: 1 },
   ];
   const master = document.createElement("div");

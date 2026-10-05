@@ -37,7 +37,7 @@ from PIL import Image
 from scipy import ndimage as ndi
 
 sys.path.insert(0, str(Path(__file__).parent))
-from scene_prep import SKY_MODEL, linear_to_srgb, sky_probability, srgb_to_linear  # noqa: E402
+from scene_prep import SKY_MODEL, class_probability, linear_to_srgb, sky_probability, srgb_to_linear  # noqa: E402
 
 MODEL = "Ruicheng/moge-2-vitl-normal"
 VISTA_MIN_M = 100.0  # pillars and spire reach to 80 m in the markup
@@ -274,9 +274,30 @@ def main() -> None:
     Image.fromarray(n_main).save(args.out / "normal.png")
     Image.fromarray((kept.astype(np.uint8) * 255)).save(args.out / "kept.png")
     background = []
+    # Water in the vista (river, lakes): SegFormer on the plate. Stored in the vista layer's albedo alpha (255 = not
+    # water) for the renderer's flowing-water look; only out in the vista, never on near rock.
+    water = class_probability(Image.fromarray(plate), SKY_MODEL, ["water", "river", "sea", "lake", "waterfall"])
+    # The model finds part of the river; grow it by colour (Lab, Mahalanobis to the found water) through connected pixels.
+    seed = (water > 0.5) & (z_plate > VISTA_MIN_M) & ~sky
+    if seed.sum() > 200:
+        lab = cv2.cvtColor(plate, cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(np.float64)
+        mu = lab[seed.ravel()].mean(0)
+        cov = np.cov(lab[seed.ravel()].T) + np.eye(3) * 4
+        dlt = lab - mu
+        md = np.einsum("ij,jk,ik->i", dlt, np.linalg.inv(cov), dlt).reshape(H, W)
+        bright = lab[:, 0].reshape(H, W) >= np.quantile(lab[seed.ravel(), 0], 0.1) - 8  # water is brighter than its banks
+        like = (md < 25) & bright & (z_plate > VISTA_MIN_M) & ~sky
+        like = ndi.binary_opening(like, iterations=1)
+        comp, _ = ndi.label(like | seed)
+        keep = np.unique(comp[seed])
+        water = np.maximum(water, np.isin(comp, keep[keep > 0]).astype(np.float64))
+    water = cv2.GaussianBlur(np.clip((water - 0.35) / 0.3, 0, 1).astype(np.float32), (0, 0), 2) * (z_plate > VISTA_MIN_M) * ~sky
+    print(f"  water: {(water > 0.5).mean() * 100:.1f}% of the picture")
     for name, rgb, alb, nrm, z in layers:
         z.astype("<f4").tofile(args.out / f"{name}_depth.bin")
         Image.fromarray(rgb).save(args.out / f"{name}_photo.png")
+        if name == "bg":
+            alb = np.dstack([alb, np.round(255 * (1 - water)).astype(np.uint8)])
         Image.fromarray(alb).save(args.out / f"{name}_albedo.png")
         Image.fromarray(nrm).save(args.out / f"{name}_normal.png")
         background.append({"depth": f"{name}_depth.bin", "image": f"{name}_photo.png", "albedo": f"{name}_albedo.png", "normal": f"{name}_normal.png"})

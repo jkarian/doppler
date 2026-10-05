@@ -209,6 +209,22 @@ def metric_depth(img: Image.Image, model_id: str) -> tuple[np.ndarray, float]:
     return post["predicted_depth"].float().cpu().numpy().astype(np.float64), float(post["field_of_view"])
 
 
+def class_probability(img: Image.Image, model_id: str, names: list[str]) -> np.ndarray:
+    """SegFormer (ADE20K) probability that each pixel is any of the named classes."""
+    import torch
+    from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
+
+    device, _ = device_and_dtype()
+    processor = AutoImageProcessor.from_pretrained(model_id)
+    model = SegformerForSemanticSegmentation.from_pretrained(model_id).to(device).eval()
+    ids = [model.config.label2id[n] for n in names]
+    with torch.no_grad():
+        logits = model(**processor(images=img, return_tensors="pt").to(device)).logits
+        logits = torch.nn.functional.interpolate(logits, size=(img.height, img.width), mode="bilinear")
+        prob = logits.softmax(dim=1)[0, ids].sum(0)
+    return prob.cpu().numpy().astype(np.float64)
+
+
 def sky_probability(img: Image.Image, model_id: str) -> np.ndarray:
     """SegFormer (ADE20K) probability that each pixel is sky."""
     import torch
