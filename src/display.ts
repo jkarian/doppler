@@ -273,7 +273,7 @@ async function main() {
   const step = Math.max(2, Math.ceil(Math.sqrt((W * H) / 1_000_000)));
   const grid = [Math.ceil(W / step), Math.ceil(H / step)];
 
-  const UNIFORM_FLOATS = 76;
+  const UNIFORM_FLOATS = 80;
   // Lasers: header (count) + 4 fixtures x 24 floats + 96 beams x 4 floats. Layout matches `Lasers` in scene.wgsl.
   const LASER_FIXTURES = 16; // matches `Lasers` in scene.wgsl: scanning rigs take one fixture each
   const LASER_FLOATS = 4 + LASER_FIXTURES * 24 + LASER_FIXTURES * 24 * 2 * 4;
@@ -449,6 +449,7 @@ async function main() {
   const beamRefZ = pivotZ;
   // Where laser brightness is as tuned (nearer: brighter, further: fainter): about where the rigs stand.
   const laserRefZ = info.metersPerUnit ? 200 / info.metersPerUnit : pct(0.8);
+  const metersPerUnitScene = info.metersPerUnit ?? (15840 * 0.3048) / pct(0.95);
   // Width of the line a laser plane draws on the rock: about 3 inches on true-scale scenes (0: the old look).
   const laserLineW = info.metersPerUnit ? 0.051 / info.metersPerUnit : 0; // 2 inches
   // Depth of the rock around the camera: the sun's shadows treat anything this near as part of the cave.
@@ -1127,6 +1128,10 @@ async function main() {
       look.sun ? graphOut.sun?.bounce ?? 0 : 0, graphOut.sun?.shadowSoftness ?? 0.1, graphOut.sun?.shadowDepth ?? 0.6, graphOut.sun?.caveDepth ?? 15,
       ...UP, bgBindGroups.length,
       graphOut.sun?.terminator ?? 0, laserRefZ, laserLineW, time,
+      // Aerial haze by hand (Sky node: opacity, near, far in metres), else physical.
+      ...(graphOut.sky && graphOut.sky.haze >= 0
+        ? [graphOut.sky.haze, graphOut.sky.hazeNear / metersPerUnitScene, graphOut.sky.hazeFar / metersPerUnitScene, 1]
+        : [0, 0, 0, 0]),
     ]);
     uniforms[39] = look.sun ? look.flare * flareVisible : 0; // after sunScreen() measured visibility
     uniforms[55] = graphOut.sun?.detailBump ?? 0; // scanLines.w: fine rock relief from the photo's texture

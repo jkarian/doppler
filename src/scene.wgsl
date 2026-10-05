@@ -43,7 +43,17 @@ struct Uniforms {
   sunB: vec4f,         // bounce light strength, sun shadow softness (0 hard..1), far-ridge solid depth, cave rock solid depth (fractions of distance)
   up: vec4f,           // true vertical in scene space (the photo's camera looks down a little); w: layers behind the main one
   sunC: vec4f,         // sun terminator hardness (0 = soft Lambert falloff, 1 = hard), laser reference distance, laser line width, time (s)
+  hazeC: vec4f,        // aerial haze by hand: opacity at and beyond far, near, far (scene units), on (1/0); off: hazeBeta
 };
+
+// How much of a surface (or laser) at distance d shows through the air (1 = all). By hand (Sky node haze, near,
+// far): none before near, ramping evenly in log distance to `opacity` at far. Otherwise physical (hazeBeta).
+fn airTransmit(d: f32) -> f32 {
+  if (u.hazeC.w > 0.5) {
+    return 1.0 - u.hazeC.x * smoothstep(log(max(u.hazeC.y, 1e-3)), log(max(u.hazeC.z, u.hazeC.y * 1.01)), log(max(d, 1e-3)));
+  }
+  return exp(-u.hazeBeta * d);
+}
 
 // The sky by the sun's height. Three looks, each a gradient up from the lowest open sky (t 0) to the
 // top (t 1): dusk (the sun at the horizon), golden (about 14 degrees up), day (35 and higher).
@@ -400,7 +410,7 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
       let edgeLine = bi == 0u || bi + 1u == n;
       let drawn = !scanned || edgeLine;
       // The air veils the far parts of a beam like the far land (aerial perspective).
-      let gb = select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen * exp(-u.hazeBeta * t) * laserNear(t);
+      let gb = select(0.0, 6.0, drawn) * beamProfile(ang, drawAng, L.glow) * energy * mix(1.0, select(0.12, 0.5, scanned), min(L.sheet, 1.0)) * distanceFade(t) * seen * airTransmit(t) * laserNear(t);
       if (gb > 1e-4) { g += gb * airDensity(cam + t * v); }
       // A ground rig: a small bright source where the beam starts, if it's in front of what we see.
       if (db.w < 0.0) {
@@ -821,7 +831,7 @@ fn fs(@builtin(position) frag: vec4f, @location(0) uv: vec2f, @location(1) @inte
   var vis = select(visUp(shadowTex, uv, z), vec4f(1.0), u.shadows < 0.5);
   var vis2 = select(visUp(shadowTex2, uv, z), vec4f(1.0), u.shadows < 0.5);
   let shadow = vis.r;
-  let haze = exp(-u.hazeBeta * z);
+  let haze = airTransmit(z);
   // Sun on the floor can be held back so it lights the walls and high ground, however high it climbs.
   // Floor: flat ground (normal pointing up) that is low (the canyon floor, the river) or part of the cave
   // around us. Plateau tops and high ledges are flat too, but stay lit.

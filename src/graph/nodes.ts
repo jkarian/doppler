@@ -129,6 +129,9 @@ export interface SkyOut {
   glow: number; // warm glow around the sun
   span: number; // degrees from the lowest open sky to where the gradient reaches its top colour
   visibility: number; // km of visibility for the aerial haze (0: the scene's own)
+  haze: number; // 0..1 haze by hand (opacity at hazeFar); -1 off
+  hazeNear: number; // metres
+  hazeFar: number; // metres
 }
 
 export interface RenderOut {
@@ -1078,12 +1081,16 @@ const defs: NodeDef[] = [
       { name: "glow", default: 0.4, min: 0, max: 3, step: 0.05 },
       { name: "span", default: 25, min: 3, max: 90, step: 1, doc: "degrees" },
       { name: "visibility", default: 0, min: 0, max: 500, step: 1, doc: "km: how far the air lets you see (aerial haze on far land and lasers). 0: the scene's own" },
+      { name: "haze", default: -1, min: -1, max: 1, step: 0.01, doc: "0..1: haze by hand, how much the land at hazeFar and beyond fades into the sky colour (overrides visibility). -1: off" },
+      { name: "hazeNear", default: 300, min: 1, max: 100000, step: 10, doc: "metres: where the haze starts" },
+      { name: "hazeFar", default: 30000, min: 10, max: 200000, step: 100, doc: "metres: where it reaches its full opacity" },
     ],
     outputs: [],
     eval: (i, ctx) => {
       ctx.out.sky = {
         mix: clamp(num(i.mix), 0, 1), brightness: Math.max(0, num(i.brightness)), clouds: clamp(num(i.clouds), 0, 1),
         glow: Math.max(0, num(i.glow)), span: Math.max(1, num(i.span)), visibility: Math.max(0, num(i.visibility)),
+        haze: num(i.haze) < 0 ? -1 : clamp(num(i.haze), 0, 1), hazeNear: Math.max(1, num(i.hazeNear)), hazeFar: Math.max(num(i.hazeNear) * 1.01, num(i.hazeFar)),
       };
       return {};
     },

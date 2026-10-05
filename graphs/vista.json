@@ -781,7 +781,10 @@
    "name": "Sky",
    "params": {
     "brightness": 3.4,
-    "visibility": 60
+    "visibility": 60,
+    "haze": 0.45,
+    "hazeNear": 400,
+    "hazeFar": 30000
    },
    "pos": [
     620,
