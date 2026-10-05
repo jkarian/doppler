@@ -495,6 +495,7 @@ const defs: NodeDef[] = [
       { name: "breakdown", default: 1, kind: "const", min: 0, max: 1, step: 1 },
       { name: "normal", default: 1, kind: "const", min: 0, max: 1, step: 1 },
       { name: "outro", default: 1, kind: "const", min: 0, max: 1, step: 1 },
+      { name: "drops", default: "", kind: "const", doc: "which drops it plays in, counted from 1 (e.g. 2, or 1 3); a leading - means all but those (e.g. -2). Empty: all" },
       { name: "fadeIn", default: 0.05, kind: "const", min: 0, max: 8, step: 0.05, doc: "seconds" },
       { name: "fadeOut", default: 1.5, kind: "const", min: 0, max: 8, step: 0.05, doc: "seconds" },
     ],
@@ -506,9 +507,16 @@ const defs: NodeDef[] = [
         const k = kind === "quiet" ? "breakdown" : kind;
         return num(c[k] ?? 0) > 0.5;
       };
+      // Drops by number: "2" only the second, "1 3" those two, "-2" all but the second.
+      const spec = String(c.drops ?? "").trim();
+      const except = spec.startsWith("-");
+      const nums = new Set(spec.replace(/^-/, "").split(/[\s,]+/).filter(Boolean).map(Number));
       const runs: [number, number][] = [];
+      let dropNo = 0;
       for (const s of ctx.music?.a.sections ?? []) {
+        if (s.kind === "drop") dropNo++;
         if (!want(s.kind)) continue;
+        if (s.kind === "drop" && nums.size && nums.has(dropNo) === except) continue;
         const last = runs.at(-1);
         if (last && Math.abs(last[1] - s.start) < 1e-3) last[1] = s.end;
         else runs.push([s.start, s.end]);

@@ -665,7 +665,8 @@
     "drop": 1,
     "breakdown": 0,
     "normal": 1,
-    "outro": 0
+    "outro": 0,
+    "drops": "-2"
    },
    "pos": [
     1630,
@@ -809,7 +810,8 @@
     "drop": 1,
     "breakdown": 0,
     "normal": 0,
-    "outro": 0
+    "outro": 0,
+    "drops": "-2"
    },
    "pos": [
     1630,
@@ -920,7 +922,8 @@
     "drop": 1,
     "breakdown": 0,
     "normal": 0,
-    "outro": 0
+    "outro": 0,
+    "drops": "2"
    }
   },
   {
