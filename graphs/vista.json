@@ -981,7 +981,10 @@
     "seed": 21,
     "rigs": "0.45,0.25,90,-8,0",
     "intensity": 1.4,
-    "sweepOneWay": 1
+    "sweepOneWay": 1,
+    "clearAt": "0.553,0.6",
+    "nearSpeed": 0.333,
+    "farSpeed": 2
    }
   },
   {
@@ -1016,7 +1019,10 @@
     "rigs": "0.57,0.21,-90,-8,0",
     "intensity": 1.4,
     "flare": 6,
-    "sweepOneWay": 1
+    "sweepOneWay": 1,
+    "clearAt": "0.553,0.6",
+    "nearSpeed": 0.333,
+    "farSpeed": 2
    }
   }
  ],

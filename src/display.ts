@@ -1301,11 +1301,28 @@ async function main() {
       // The plane swings across itself (around its sideways axis), each rig out of step: wider and faster on peaks.
       const across = normalize(cross(d, right));
       // Back and forth, or one way (sawtooth) blanking near the ends so the restart doesn't show.
-      const ph = S.sweepPhase + bi * 0.3;
-      const saw = ph - Math.floor(ph);
       // One-way scans always travel away from the viewer (deeper into the scene), both rigs alike.
       const away = S.sweepOneWay > 0.5 && dot(across, FWD) < 0 ? -1 : 1;
-      let swing = away * S.sweep * S.sweepBoost * rad * (S.sweepOneWay > 0.5 ? 2 * saw - 1 : Math.sin(2 * Math.PI * S.sweepPhase + bi * 1.9));
+      const range = S.sweep * S.sweepBoost * rad;
+      // Speed change: the part of the sweep before the line passes clearAt (f from 0, the near end) runs at nearSpeed,
+      // the rest at farSpeed, relative to the plain speed (a pass then takes `total` times as long).
+      let a = 0;
+      let total = 1;
+      if (S.sweepOneWay > 0.5 && S.clearAt.length >= 2 && range > 0) {
+        const pt = viewPos(S.clearAt[0], S.clearAt[1]);
+        const toPt = normalize([pt[0] - o[0], pt[1] - o[1], pt[2] - o[2]]);
+        a = clamp((away * Math.atan2(dot(toPt, across), dot(toPt, d)) / range + 1) / 2, 0.01, 0.99);
+        total = a / S.nearSpeed + (1 - a) / S.farSpeed;
+      }
+      const ph = (S.sweepPhase + bi * 0.3) / total;
+      const saw = ph - Math.floor(ph);
+      let f = saw;
+      if (a > 0) {
+        const tNear = a / S.nearSpeed;
+        const tt = saw * total;
+        f = tt < tNear ? tt * S.nearSpeed : a + (tt - tNear) * S.farSpeed;
+      }
+      let swing = away * range * (S.sweepOneWay > 0.5 ? 2 * f - 1 : Math.sin(2 * Math.PI * S.sweepPhase + bi * 1.9));
       const blank = S.sweepOneWay > 0.5 ? Math.min(1, saw / 0.04, (1 - saw) / 0.04) : 1;
       // Camera hit: swing toward the angle at which the plane passes through the camera.
       const cam = camPos(time);

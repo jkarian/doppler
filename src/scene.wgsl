@@ -410,8 +410,9 @@ fn laserLight(p: vec3f, sky: bool) -> LaserLight {
           g += 3.0 * beamProfile(angO, drawAng * 1.5, 3.0) * distanceFade(to);
         }
       }
-      // Hot spot where the beam lands on the rock.
-      if (drawn && b.w < L.maxLen * 0.999) {
+      // Hot spot where the beam lands on the rock (not for scanning planes: their line on the rock already shows it,
+      // and the edge rays' landing glow sat on the river as a blob).
+      if (drawn && !scanned && b.w < L.maxLen * 0.999) {
         let end = o + b.w * d;
         // Additive: a glowing point where the beam strikes, with the beam's profile...
         let te = dot(end - cam, v);
