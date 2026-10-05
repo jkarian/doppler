@@ -529,8 +529,11 @@ def lift_hair(out: Path, lay: dict, photo: np.ndarray, clean: np.ndarray, band: 
     rgba[sel, :3] = col[sel].astype(np.uint8)
     rgba[sel, 3] = np.maximum(1, (a[sel] * 255).round()).astype(np.uint8)
     solid = rgba[..., 3] == 255
+    # Depth of the nearest real pixel, smoothed: nearest alone jumps where the nearest part changes (belly to tail)
+    # and one strand would be cut into pieces at different depths that drift apart as the camera moves.
     _, (iy, ix) = ndi.distance_transform_edt(~solid, return_indices=True)
-    z[sel] = z[iy[sel], ix[sel]]
+    zs = cv2.GaussianBlur(z[iy, ix].astype(np.float32), (0, 0), 25)
+    z[sel] = zs[sel]
     Image.fromarray(rgba, "RGBA").save(out / lay["image"])
     z.astype("<f4").tofile(out / lay["depth"])
     print(f"  {lay['name']}: lifted {sel.sum()} px of fibres (mean alpha {a[sel].mean():.2f}) from the clean plate")
@@ -557,11 +560,17 @@ def paint(out: Path, border: float, reach: float, move: float, margin: float) ->
     # there (no fibres); at the end the fibres are pulled out of the photo against that clean plate (difference
     # key) as soft alpha on the hair layer, at the depth of its nearest real pixel: they move with it.
     hair_r = int(round(0.08 * max(W, H)))
-    bands = {i: cv2.dilate(owns[i].astype(np.uint8), ellipse(hair_r)).astype(bool) & ~owns[i] & owns[-1] & ~ring
-             for i, lay in enumerate(meta) if lay.get("hair") and i < len(meta) - 1}
-    for i in bands:  # nearer layers' pixels never take another layer's hair
-        for j in range(i):
-            bands[i] &= ~cv2.dilate(owns[j].astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    hairy = [i for i, lay in enumerate(meta) if lay.get("hair") and i < len(meta) - 1]
+    dist = {i: ndi.distance_transform_edt(~owns[i]) for i in hairy}
+    bands = {}
+    for i in hairy:  # each fibre goes with the hair layer it is closest to (the nearer layer on a tie)
+        b = (dist[i] <= hair_r) & ~owns[i] & owns[-1] & ~ring
+        for j in hairy:
+            if j != i:
+                b &= (dist[i] < dist[j]) | ((dist[i] == dist[j]) & (i < j))
+        for j in range(i):  # nearer layers' pixels never take another layer's hair
+            b &= ~cv2.dilate(owns[j].astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+        bands[i] = b
     hair_px = np.zeros(ring.shape, bool)
     for b in bands.values():
         hair_px |= b

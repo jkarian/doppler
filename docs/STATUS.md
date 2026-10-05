@@ -7,8 +7,9 @@ night**; its real sunrise is still its next step).
 ## Whale shark 2026-10-05 (camera-mapping, third test image; the "hard one")
 
 `images/whale_shark.webp` -> `scenes/whale-shark` (scale x2: the user set the shark to 10 m nose to tail tip; MoGe
-said ~5 m). Export to open: `scenes/whale-shark/maya/v002/whale_shark_v002.ma` (v001 is missing the sky card's
-texture: export bug, fixed; v001 kept, ask before deleting). Not yet reviewed by the user in Maya.
+said ~5 m). Export to open: `scenes/whale-shark/maya/v003/whale_shark_v003.ma` (v001 is missing the sky card's
+texture: export bug, fixed; v001 kept, ask before deleting). The user's verdict on v002: "a good result", one
+bulgy area at the near fin's tip: fixed in v003 (below), not yet re-checked by the user.
 Layers: fin (near pectoral), shark (body + head + dorsal + tail, with fibres as soft alpha), farfin, water (open,
 on the far card at 22 m). Hard because it's see-through, has hair-like glowing fibres and an out-of-focus backdrop.
 
@@ -20,6 +21,9 @@ New per-part options in parts.json (general, for any image):
   layer is painted clean in the back layer, then the fibres are pulled out of the photo against that clean plate
   (difference key, `lift_hair`) as soft alpha on the layer, at the depth of its nearest real pixel: they recede with
   the body (the user's requirement). Maya takes the soft alpha through the projection's transparency.
+  Each fibre goes with the closest hair layer (the fin has hair too: its tip's fibres were on the shark, cut into
+  pieces at 3.5 m and 7 m that drifted apart = the bulge the user saw). Hair depth is the nearest real pixel's,
+  smoothed (sigma 25 px), so a strand never jumps in depth where the nearest body part changes.
 - `"open": true` (back layer): open water / clear sky. No mesh; all of it goes on the far card. Filled by
   `smooth_backdrop` (multi-scale normalized blur of the real water, fine detail added back) instead of Flux: Flux
   painted a sparkle ghost of the shark into the shark-shaped hole, and a plain inpaint left the shark's outline
@@ -28,7 +32,9 @@ New per-part options in parts.json (general, for any image):
   painted above it otherwise).
 
 Open: parallax is the default +/-30 cm sway (gentle for a 10 m animal at 3-7 m; `export --move 1.0` if the user
-wants more); shark mesh ~460k triangles (NEXT 4); bokeh specks near the shark ride with it (lifted with the fibres).
+wants more); shark mesh ~460k triangles (NEXT 4); bokeh specks near the shark ride with it (lifted with the fibres);
+a few teal/green fibre fragments round the head (the un-mixing `(photo - plate) / alpha` amplifies tint where alpha
+is small; clamping the colour toward the fibre's own hue would fix it; the user said not to risk other things).
 Commands, for redoing it: `measure`, `scale --factor 2`, parts.json (in scenes/, git-ignored), `segment_parts.py`,
 `layers`, `paint` (~6 min), `export`.
 
