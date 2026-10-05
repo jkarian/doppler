@@ -780,7 +780,8 @@
    "type": "Sky",
    "name": "Sky",
    "params": {
-    "brightness": 3.4
+    "brightness": 3.4,
+    "visibility": 60
    },
    "pos": [
     620,

@@ -1118,7 +1118,8 @@ async function main() {
       ...look.color, look.coneSoft,
       look.cap, look.shadows ? 1 : 0, view, 0.98,
       ...camPos(time), pivotZ,
-      grid[0], grid[1], info.haze?.beta ?? 0, look.baked,
+      // Aerial haze: Koschmieder, extinction 3.9 / visibility (Sky node, km), else the scene's own.
+      grid[0], grid[1], graphOut.sky?.visibility && info.metersPerUnit ? (3.9 / (graphOut.sky.visibility * 1000)) * info.metersPerUnit : info.haze?.beta ?? 0, look.baked,
       look.sun ? 1 : 0, look.rays, caveDepth, 0,
       ...sunScreen(look), look.sun ? skyBoost : 0, sunFloor,
       ...scanUniforms(graphOut.scan),

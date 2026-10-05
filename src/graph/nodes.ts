@@ -128,6 +128,7 @@ export interface SkyOut {
   clouds: number; // 0..1: the photo's clouds kept as texture on the gradient
   glow: number; // warm glow around the sun
   span: number; // degrees from the lowest open sky to where the gradient reaches its top colour
+  visibility: number; // km of visibility for the aerial haze (0: the scene's own)
 }
 
 export interface RenderOut {
@@ -1076,12 +1077,13 @@ const defs: NodeDef[] = [
       { name: "clouds", default: 0.6, min: 0, max: 1, step: 0.05 },
       { name: "glow", default: 0.4, min: 0, max: 3, step: 0.05 },
       { name: "span", default: 25, min: 3, max: 90, step: 1, doc: "degrees" },
+      { name: "visibility", default: 0, min: 0, max: 500, step: 1, doc: "km: how far the air lets you see (aerial haze on far land and lasers). 0: the scene's own" },
     ],
     outputs: [],
     eval: (i, ctx) => {
       ctx.out.sky = {
         mix: clamp(num(i.mix), 0, 1), brightness: Math.max(0, num(i.brightness)), clouds: clamp(num(i.clouds), 0, 1),
-        glow: Math.max(0, num(i.glow)), span: Math.max(1, num(i.span)),
+        glow: Math.max(0, num(i.glow)), span: Math.max(1, num(i.span)), visibility: Math.max(0, num(i.visibility)),
       };
       return {};
     },

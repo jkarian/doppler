@@ -136,6 +136,7 @@ const HELP: Record<string, string> = {
   "Sky.mix": "0 = the photo's own sky, 1 = the colour gradient that follows the sun.",
   "Sky.brightness": "How bright the sky is.",
   "Sky.clouds": "How much of the photo's clouds shows as texture on the gradient.",
+  "Sky.visibility": "How far the air lets you see, in km: the haze that makes far land and lasers recede. Lower = thicker, more depth haze. 0 = the scene's own.",
   "Sky.glow": "Warm glow around the sun in the sky.",
   "Sky.span": "How tall the gradient is, in degrees above the lowest open sky.",
   "Tone.baseDim": "Brightness of the dark night scene before any lights.",

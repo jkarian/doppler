@@ -167,10 +167,40 @@ def main() -> None:
 
     lin = lambda c: srgb_to_linear(c.astype(np.float64) / 255.0)
     ref = kept & ~sky
-    gain = np.median(lin(albedo)[ref], 0) / np.maximum(np.median(lin(photo)[ref], 0), 1e-4)
-    plate_albedo = np.round(linear_to_srgb(np.clip(lin(plate) * gain, 0, 1)) * 255).astype(np.uint8)
-    bg_albedo = np.where(kept[..., None], albedo, plate_albedo)
-    print(f"  plate albedo gain {np.round(gain, 3)}")
+    # The vista's rock colour without the photo's own haze: the renderer adds aerial haze itself (Sky visibility), so
+    # baked-in haze made the far canyon washed out twice over next to the saturated near rock. Dehaze the plate with its
+    # depth (airlight: the sky just above the land; extinction: the value that makes rock colour steadiest with distance),
+    # then use the near rock's photo-to-albedo gain (the pillars: near, so barely hazed) for all of it.
+    Lp = lin(plate)
+    rows = np.nonzero(sky.any(1))[0]
+    edge = sky & ~ndi.binary_erosion(sky, iterations=6)
+    airlight = np.median(Lp[edge & (ndi.binary_dilation(land, iterations=12))], 0)
+    far_land = land & (z_plate > 150)
+    bins = np.quantile(np.log(z_plate[far_land]), np.linspace(0, 1, 9))
+    which = np.digitize(np.log(z_plate[far_land]), bins[1:-1])
+    lum = (Lp[far_land] * np.array([0.2126, 0.7152, 0.0722])).sum(-1)
+    best = (np.inf, 0.0)
+    for beta in np.geomspace(1e-5, 2e-3, 60):
+        t = np.exp(-beta * z_plate[far_land])
+        j = (lum - airlight @ np.array([0.2126, 0.7152, 0.0722]) * (1 - t)) / np.maximum(t, 0.15)
+        meds = np.array([np.median(j[which == k]) for k in range(8)])
+        if (meds <= 0).any():
+            continue
+        spread = np.std(np.log(meds))
+        if spread < best[0]:
+            best = (spread, beta)
+    beta = best[1]
+    t = np.exp(-beta * np.where(land, z_plate, 0))[..., None]
+    plate_clear = np.clip((Lp - airlight * (1 - t)) / np.maximum(t, 0.15), 0, 1)
+    pil = pillars if pillars.any() else ref
+    # Brightness only (one number for all channels): the painting keeps its own hues (blue water, green brush); a
+    # per-channel gain from the red pillars took the blue out of the river.
+    lw = np.array([0.2126, 0.7152, 0.0722])
+    gain = np.median(lin(albedo)[pil] @ lw) / max(np.median(lin(photo)[pil] @ lw), 1e-4)
+    plate_albedo = np.round(linear_to_srgb(np.clip(plate_clear * gain, 0, 1)) * 255).astype(np.uint8)
+    plate_albedo[sky] = np.round(linear_to_srgb(np.clip(Lp * gain, 0, 1)) * 255).astype(np.uint8)[sky]
+    bg_albedo = plate_albedo.copy()
+    print(f"  plate dehazed: airlight {np.round(airlight, 3)}, extinction {beta:.2e}/m (visibility {3.9 / beta / 1000:.0f} km in the photo)")
 
     rel = lambda name: os.path.normpath(Path("..") / args.scene.name / name).replace("\\", "/")
     layers = []  # (name, photo, albedo, normal, depth), front to back, behind the main layer
