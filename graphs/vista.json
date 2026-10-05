@@ -902,7 +902,7 @@
    "params": {
     "r": 0.35,
     "g": 0.2,
-    "b": 1.0
+    "b": 1
    }
   },
   {
@@ -965,7 +965,7 @@
     "scanLines": 24,
     "scanBright": 0.03,
     "flicker": 0.05,
-    "sweep": 55,
+    "sweep": 88,
     "sweepSpeed": 0.08,
     "peakWider": 0,
     "peakFaster": 0,
@@ -976,7 +976,7 @@
     "reach": 1,
     "fade": 0,
     "seed": 21,
-    "rigs": "0.45,0.25,65,-8,0",
+    "rigs": "0.45,0.25,90,-8,0",
     "intensity": 1.4,
     "sweepOneWay": 1
    }
@@ -999,7 +999,7 @@
     "scanLines": 24,
     "scanBright": 0.03,
     "flicker": 0.05,
-    "sweep": 55,
+    "sweep": 88,
     "sweepSpeed": 0.08,
     "peakWider": 0,
     "peakFaster": 0,
@@ -1010,7 +1010,7 @@
     "reach": 1,
     "fade": 0,
     "seed": 22,
-    "rigs": "0.57,0.21,-65,-8,0",
+    "rigs": "0.57,0.21,-90,-8,0",
     "intensity": 1.4,
     "flare": 6,
     "sweepOneWay": 1
