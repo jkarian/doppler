@@ -203,7 +203,12 @@ tuning), ideally starting from automatic suggestions (lights in nooks, rigs on l
      `cam=sweep` / `cam=x,y` move or hold the camera for parallax checks). Lighting retuned for true scale in
      graphs/vista.json (the scene's own graph via scene.json "graph"): nook pools rescaled per light, near split
      820 ft, sun floor -1100 ft; aerial perspective toward the sky gradient (haze from ~150 km visibility); sky from
-     SegFormer. Open items: uncovered strips of layers behind get no image-space shadow (better than the wrong
+     SegFormer. Build now: `layers_from_markup.py scenes/canyon-moge images/markup_layers.webp scenes/canyon-layers-moge`
+     then `vista_plate.py scenes/canyon-layers-moge images/canyon_midground.png scenes/canyon-vista --middle
+     images/canyon_middle.png` (MoGe cave depth: the old fused depth's radial streaks cast straight shadow lines).
+     Lasers have real width on true-scale scenes (angle at 500 m); rig fans hold 1 s (Peaks hold). Depth pre-pass
+     keeps three layers near single-layer cost. Waiting on the user: a cut-out of the orange rock column between the
+     spire and the right cave wall (in no cut-out, so the plate's repainted version shows). Open items: uncovered strips of layers behind get no image-space shadow (better than the wrong
      one; per-layer shadows would be the real fix); the river floor looks bright at the drop; the dark nook at the left mesa's base is in the painting; mountains map to ~13 km
      (markup says 20-30). User's idea, agreed direction: a general camera-mapping tool (split into layers, find
      where each needs "back information", inpaint it, depth per layer) = the one-command image-to-scene goal.
