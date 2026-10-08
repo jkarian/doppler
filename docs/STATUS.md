@@ -6,6 +6,10 @@ night**; its real sunrise is still its next step).
 
 ## Plan 2026-10-08: turn camera-map into an agent (discussed, nothing built yet)
 
+**Superseded by [camera-map-agent.md](camera-map-agent.md)** (later the same day): traits as tags, a method library
+(each image may need its own method), a casebook the agent learns from, promotion one-off -> method -> core. The
+regression idea below now only covers cases sharing changed code. Kept for the history.
+
 The user wants: drop in an image, an agent does exactly what Claude did by hand (incl. adapting like the fibre key).
 Experience lives in files (STATUS lessons, the tool's options, the test scenes), not in the model: an agent reading
 them starts where we are. Two loops:
