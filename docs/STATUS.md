@@ -1,136 +1,16 @@
 # Doppler Canyon: status and handoff
 
-Last updated 2026-10-05 (late evening). Read this first when picking the project back up. Two threads: the
-**camera-mapping utility** (start with **Whale shark 2026-10-05** and **Handoff 2026-10-05** below) and the canyon visualizer (**Handoff 2026-10-04
-night**; its real sunrise is still its next step).
+Last updated 2026-10-05 (late evening). Read this first when picking the project back up. The camera-mapping
+utility moved to its own project (see below); this file is the canyon visualizer (**Handoff 2026-10-04 night**; its
+real sunrise is still its next step).
 
-## Plan 2026-10-08: turn camera-map into an agent (discussed, nothing built yet)
+## Camera-mapping utility: moved out (2026-10-08)
 
-**Superseded by [camera-map-agent.md](camera-map-agent.md)** (later the same day): traits as tags, a method library
-(each image may need its own method), a casebook the agent learns from, promotion one-off -> method -> core. The
-regression idea below now only covers cases sharing changed code. Kept for the history.
-
-The user wants: drop in an image, an agent does exactly what Claude did by hand (incl. adapting like the fibre key).
-Experience lives in files (STATUS lessons, the tool's options, the test scenes), not in the model: an agent reading
-them starts where we are. Two loops:
-1. Run loop (each image): write parts.json, propose the size (the user confirms: the only human step), segment,
-   layers, paint, export; look at each check image, fix parts.json, bounded retries. Never edits code mid-run.
-2. Improvement loop (when the tools can't cope): diagnose, build a GENERAL mechanism (like outline/hair/open),
-   re-run every past scene (car, ice cave, whale shark) against its last good result, write the lesson here,
-   propose it to the user as a branch with before/after images. The user approves; later runs inherit it.
-Build in this order:
-1. Regression check: re-run car-beach and ice-cave on the current code, compare with their last exports. NOT done
-   after this week's changes; two shared changes touch every scene: past-frame extension only from where a layer
-   touches the frame edge, and see-through ("outline": "sam") layers no longer take unclaimed pixels.
-2. Motion check: render the layers from the camera's extreme positions side by side (numpy, no Maya), so the agent
-   sees parallax faults; both faults the user found in Maya (fin bleed, fibre bulge) only show in motion.
-3. The skill (.claude/skills/camera-map/SKILL.md): procedure, commands, parts.json rules, per-check-image failure
-   list (halo, edge bleed, object painted into a hole, outline in a fill, blobs past the frame, depth jumps along a
-   strand), retry limits, both loops. Later: the same as the system prompt of an Agent SDK / API web app (each step
-   a tool returning numbers + its check image; size check as a UI screen; serverless GPU; the 3 scenes as evals).
-Marketplace idea (asked): a submission = manifest (inputs/outputs, human checkpoints, hardware, models + licences,
-cost), the skill, the tools (container image or API), evals; Claude Code's plugin marketplace layout
-(.claude-plugin/marketplace.json, skills, commands, MCP servers) is a format to copy. FLUX.1 Fill [dev] is
-non-commercial: blocks selling as is.
-Note: a power cut on 2026-10-08 zeroed .git/refs/heads/main and docs/STATUS.md mid-commit; repaired (ref reset to
-5acee46 from the reflog, index rebuilt, STATUS restored). A copy of the damaged .git is in
-D:\Projects\doppler-canyon-git-backup-20261008 (delete once happy).
-
-## Whale shark 2026-10-05 (camera-mapping, third test image; the "hard one")
-
-`images/whale_shark.webp` -> `scenes/whale-shark` (scale x2: the user set the shark to 10 m nose to tail tip; MoGe
-said ~5 m). Export to open: `scenes/whale-shark/maya/v003/whale_shark_v003.ma` (v001 is missing the sky card's
-texture: export bug, fixed; v001 kept, ask before deleting). The user's verdict on v002: "a good result", one
-bulgy area at the near fin's tip: fixed in v003 (below), not yet re-checked by the user.
-Layers: fin (near pectoral), shark (body + head + dorsal + tail, with fibres as soft alpha), farfin, water (open,
-on the far card at 22 m). Hard because it's see-through, has hair-like glowing fibres and an out-of-focus backdrop.
-
-New per-part options in parts.json (general, for any image):
-- `"outline": "sam"`: see-through objects (glassy fins). BiRefNet cuts what shows through them (holes, ragged
-  edges); SAM's outline stands and is final: depth (blurred across edges) no longer grows it into unclaimed pixels
-  (that was a dark bleed round the fin tip, which the user spotted).
-- `"hair": true`: fine see-through detail round the outline (fibres, fur, wisps). A band (8% of the frame) round the
-  layer is painted clean in the back layer, then the fibres are pulled out of the photo against that clean plate
-  (difference key, `lift_hair`) as soft alpha on the layer, at the depth of its nearest real pixel: they recede with
-  the body (the user's requirement). Maya takes the soft alpha through the projection's transparency.
-  Each fibre goes with the closest hair layer (the fin has hair too: its tip's fibres were on the shark, cut into
-  pieces at 3.5 m and 7 m that drifted apart = the bulge the user saw). Hair depth is the nearest real pixel's,
-  smoothed (sigma 25 px), so a strand never jumps in depth where the nearest body part changes.
-- `"open": true` (back layer): open water / clear sky. No mesh; all of it goes on the far card. Filled by
-  `smooth_backdrop` (multi-scale normalized blur of the real water, fine detail added back) instead of Flux: Flux
-  painted a sparkle ghost of the shark into the shark-shaped hole, and a plain inpaint left the shark's outline
-  (its glow). The real water goes through the same field, so there is no seam anywhere.
-- Layers are extended past the frame only from where they touch the frame's edge (the shark got blobs of water
-  painted above it otherwise).
-
-Open: parallax is the default +/-30 cm sway (gentle for a 10 m animal at 3-7 m; `export --move 1.0` if the user
-wants more); shark mesh ~460k triangles (NEXT 4); bokeh specks near the shark ride with it (lifted with the fibres);
-a few teal/green fibre fragments round the head (the un-mixing `(photo - plate) / alpha` amplifies tint where alpha
-is small; clamping the colour toward the fibre's own hue would fix it; the user said not to risk other things).
-Commands, for redoing it: `measure`, `scale --factor 2`, parts.json (in scenes/, git-ignored), `segment_parts.py`,
-`layers`, `paint` (~6 min), `export`.
-
-## Handoff 2026-10-05: camera-mapping utility (base)
-
-**Goal (the user's words):** any image in -> a matte-painting camera projection: separate cut-out layers (fg/mg/bg...),
-each extended by inpainting behind what's in front and past the frame, real-size geometry per layer, a projection
-camera that lines them up, a small animated camera for parallax, Maya out (.abc + .ma). End to end, the only user
-interaction being the dimension check. Later a web app (Claude API judges the image; users don't connect a claude.ai
-subscription). A person may optionally supply layer cut-outs and/or painted plates; the tool then only fills gaps.
-
-**Where we are.** Works end to end on two test images; the user's verdict on the car: "the general scene looks right
-and the parallax is right", artifacts left are small. Latest exports (open in Maya, look through renderCam):
-`scenes/car-beach/maya/v001/car_beach_v001.ma` (images/car_beach.webp, scale x1) and `scenes/ice-cave/maya/ice_cave.ma`
-(images/ice_cave.webp, x1.5; exported before versioning and before the seam/choke/BiRefNet fixes: re-run `layers`,
-`paint`, `export` to bring it up to date, it will become its v001). `scenes/car-beach/car_beach_saved.ma` is the
-user's accidental save, kept aside; the unversioned files directly in `scenes/car-beach/maya/` duplicate v001
-(ask before deleting). The two scenes' `parts.json` (Claude's judging) live in `scenes/` (git-ignored): don't lose them.
-
-**Tool:** `tools/camera_map.py` (+ `tools/camera_map_maya.py` under mayapy, Maya 2027). Steps:
-1. `measure <image> <scene>`: MoGe-2 metric depth, lens, normals, sky; dimensions.png with labelled sizes.
-2. `scale <scene> --factor F` or `--set name=metres`: the user confirms the size (the one interactive step).
-3. `parts.json` (written by Claude by hand so far: parts, points (u, v), near-to-far order, layer per part, a "rest"
-   layer, one prompt per layer), then `tools/segment_parts.py <scene>` (SAM 2 traces each part).
-4. `layers <scene>`: parts -> layer masks. Freestanding objects get BiRefNet's outline (sharp, real holes) as the final
-   word; strays/slivers/islands cleaned; check `layers_overlay.png`.
-5. `paint <scene>`: per layer, FLUX.1 Fill behind the nearer layers (only as far as the move reveals) and past the frame
-   (12% border); SAM check of what's painted; MoGe depth per painted layer fitted to the real depth; check
-   `layers_painted.png`. ~13 min on the 4090 for 4 layers.
-6. `export <scene>`: `maya/vNNN/` (a new version every time, never overwritten): projCam (fixed, gate = whole canvas,
-   projection nodes), renderCam (photo lens, sway, at rest on frame 1), one mesh per layer + sky card, levelled.
-Check renders (Arnold, watermark; Maya's default view transform makes them darker): scratchpad script
-`render_maya.py <scene> <frames>`; recreate it if the scratchpad is gone (open latest vNNN .ma, arnoldRender renderCam).
-
-**Lessons (each cost a round; keep them):**
-- One depth sheet with patches is wrong; separate layers are right. MoGe depth is too smooth to find layers: SAM does.
-- Cut-outs were the weak link (the user spotted it): SAM's outlines are loose, and the gap SAM's sky leaves round an
-  object got filled by depth, which MoGe blurs across edges: a band of sky moved with the car. BiRefNet fixed it.
-- Inpainting must not leave a seam (the user's point): mask exactly the hole (growing it into real pixels and pasting
-  them back left a hard join); Flux's autoencoder shifts tone slightly, so measure the shift on the same pixels just
-  outside the hole and carry it smoothly across (`membrane`). Choke the far layer 2 px next to a nearer one and bleed
-  the near layer's colours into its transparent margin: no outlines or halos left behind.
-- Flux Fill: paints an object into an object-shaped hole, duplicates whatever the prompt names, "cinematic" gives
-  letterbox bars. Prompts describe what's really there (clouds, not "misty haze"), say "empty", name nothing in view.
-- Mesh past a layer's outline must take the layer's own depth (else streaks as the camera moves); Arnold needs
-  aiOpaque off; Maya's projection node fits horizontally (projCam filmFit horizontal), measured.
-- FLUX.1 Fill loads fp8-stored (23.8 GB bf16 spills to system RAM on the 4090) from
-  C:\AI_Models\huggingface\FLUX.1-Fill-dev (hard links; the hub copy is WSL symlinks Windows can't read).
-  BiRefNet: ZhengPeng7/BiRefNet in C:\AI_Models\huggingface (needs timm, kornia: installed in tools/.venv).
-
-**NEXT (in the order discussed):**
-1. Gen-Fill style painting (the user's Photoshop habit): only the band the camera can reveal, on crops at full
-   resolution, 3 variants with the best picked automatically (edge match + SAM check), retry instead of the smear
-   fallback (the last pale sliver under the car is that fallback).
-2. The Claude API step that writes parts.json and checks layers_overlay/layers_painted (prompt rules above).
-3. Input path for the user's own cut-outs (PSD or PNGs, named near-to-far) and painted plates; anything painted beyond
-   the visible part counts as real. Plus automatic handling of contours inside a layer (strips where the move
-   reveals more than a few px), reported to the user.
-4. Adaptive / quad meshes (now 2 px grids, ~1M triangles a layer: too dense to edit in Maya).
-5. Speed: keep models loaded, 28 Flux steps, crops (estimates: H100 ~1.5-2 min a scene after that).
-**Product notes:** FLUX.1-dev licence is non-commercial: compare models when it becomes a product (BFL licence or
-FLUX Fill [pro] API vs Apache Qwen-Image-Edit / Flux 2 Klein 4B). On-demand serverless GPUs (Modal / RunPod /
-Replicate), weights (~40 GB) cached on the provider's volume. A server can't run mayapy: .abc via PyAlembic, .ma as
-text. Rough cost per image: Claude ~$0.25-0.30 (Opus 5.5), GPU ~$0.20-0.50.
+The camera-mapping tool (`camera_map.py`, `camera_map_maya.py`), its scenes (car-beach, ice-cave, whale-shark),
+images, agent design and status now live in their own project:
+D:\Projects\cameramapper (github.com/jkarian/cameramapper, private). Read its docs/STATUS.md for that thread.
+`segment_parts.py` and `research-camera-mapping.md` stay here too (the canyon tools use them); cameramapper has
+its own copies, so the two may drift.
 
 ## Handoff 2026-10-04 night
 
