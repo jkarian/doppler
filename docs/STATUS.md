@@ -4,6 +4,34 @@ Last updated 2026-10-05 (late evening). Read this first when picking the project
 **camera-mapping utility** (start with **Whale shark 2026-10-05** and **Handoff 2026-10-05** below) and the canyon visualizer (**Handoff 2026-10-04
 night**; its real sunrise is still its next step).
 
+## Plan 2026-10-08: turn camera-map into an agent (discussed, nothing built yet)
+
+The user wants: drop in an image, an agent does exactly what Claude did by hand (incl. adapting like the fibre key).
+Experience lives in files (STATUS lessons, the tool's options, the test scenes), not in the model: an agent reading
+them starts where we are. Two loops:
+1. Run loop (each image): write parts.json, propose the size (the user confirms: the only human step), segment,
+   layers, paint, export; look at each check image, fix parts.json, bounded retries. Never edits code mid-run.
+2. Improvement loop (when the tools can't cope): diagnose, build a GENERAL mechanism (like outline/hair/open),
+   re-run every past scene (car, ice cave, whale shark) against its last good result, write the lesson here,
+   propose it to the user as a branch with before/after images. The user approves; later runs inherit it.
+Build in this order:
+1. Regression check: re-run car-beach and ice-cave on the current code, compare with their last exports. NOT done
+   after this week's changes; two shared changes touch every scene: past-frame extension only from where a layer
+   touches the frame edge, and see-through ("outline": "sam") layers no longer take unclaimed pixels.
+2. Motion check: render the layers from the camera's extreme positions side by side (numpy, no Maya), so the agent
+   sees parallax faults; both faults the user found in Maya (fin bleed, fibre bulge) only show in motion.
+3. The skill (.claude/skills/camera-map/SKILL.md): procedure, commands, parts.json rules, per-check-image failure
+   list (halo, edge bleed, object painted into a hole, outline in a fill, blobs past the frame, depth jumps along a
+   strand), retry limits, both loops. Later: the same as the system prompt of an Agent SDK / API web app (each step
+   a tool returning numbers + its check image; size check as a UI screen; serverless GPU; the 3 scenes as evals).
+Marketplace idea (asked): a submission = manifest (inputs/outputs, human checkpoints, hardware, models + licences,
+cost), the skill, the tools (container image or API), evals; Claude Code's plugin marketplace layout
+(.claude-plugin/marketplace.json, skills, commands, MCP servers) is a format to copy. FLUX.1 Fill [dev] is
+non-commercial: blocks selling as is.
+Note: a power cut on 2026-10-08 zeroed .git/refs/heads/main and docs/STATUS.md mid-commit; repaired (ref reset to
+5acee46 from the reflog, index rebuilt, STATUS restored). A copy of the damaged .git is in
+D:\Projects\doppler-canyon-git-backup-20261008 (delete once happy).
+
 ## Whale shark 2026-10-05 (camera-mapping, third test image; the "hard one")
 
 `images/whale_shark.webp` -> `scenes/whale-shark` (scale x2: the user set the shark to 10 m nose to tail tip; MoGe
